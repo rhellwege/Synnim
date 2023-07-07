@@ -17,11 +17,17 @@ proc main =
   setTargetFPS(60) # Set our game to run at 30 frames-per-second
   # --------------------------------------------------------------------------------------
   # Main game loop
+  var keys: array[char, int]
   while not windowShouldClose(): # Detect window close button or ESC key
-    if isKeyPressed(A):
-      mySynth.noteOn(3.Semitone)
-    if isKeyReleased(A):
-      mySynth.noteOff()
+    
+    for i, c in "ZSXDCVGBHNJM".pairs():
+      if isKeyPressed(c.ord.KeyBoardKey):
+        keys[c] = mySynth.noteOn(i.Semitone)
+      if isKeyReleased(c.ord.KeyBoardKey):
+        mySynth.noteOff(keys[c])
+        keys[c] = -1
+    
+    #mySynth.noteOff()
     # ------------------------------------------------------------------------------------
     # Draw
     # ------------------------------------------------------------------------------------
