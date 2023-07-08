@@ -2,6 +2,9 @@ import raylib, std/[math, strformat, times, random]
 import raymath
 import locks
 
+when compileoption("profiler"):
+  import nimprof
+
 when defined(windows): # do not include windows functions that collide with the raylib namespace
   {.localPassc: "-DNODRAWTEXT".} # TODO: Apply patch to raylib.h that adds #undef LoadImage on install
 
@@ -25,8 +28,8 @@ type
     attackTime*: float = 0
     decayTime*: float = 0
     releaseTime*: float = 0
-    sustainAmplitude*: float = 1
-    attackAmplitude*: float = 1
+    sustainVolume*: float = 1
+    attackVolume*: float = 1
   OscillatorSampler* = proc(t: float, f: Hz): float
   Oscillator* =  object
     sampler*: OscillatorSampler
@@ -57,9 +60,10 @@ var
   stream: AudioStream
   synths: seq[ref Synth]
   audioMutex: Lock
-  capturingSnapshot = false
-  captureSnapshotFinished = false
-  snapshotBuffer: ptr UncheckedArray[float]
+  recording: bool
+  captureBuffer: seq[int16]
+  # outputwave has to have a global lifetime since =destroy calls unloadWave which frees the data pointer (captureBuffer)
+  outputWave: Wave = Wave(sampleSize: 16, sampleRate: sampleRate, channels: 1, frameCount: uint32 captureBuffer.len(), data: nil)
 
 converter toFreq(s: Semitone): Hz =
   return Hz baseFreq * pow(tonalroot2, s)
@@ -69,22 +73,23 @@ proc getEnvelopeVolume(n: var Note, e: EnvelopeADSR): float = # this may mark th
   let sinceOn = curTime - n.onTime
   if n.onTime > n.offTime: # the user is holding the note
     if sinceOn <= e.attackTime:
-      return remap(sinceOn, 0.0, e.attackTime, 0.0, e.attackAmplitude)
+      return remap(sinceOn, 0.0, e.attackTime, 0.0, e.attackVolume)
     elif sinceOn <= e.attackTime + e.decayTime:
-      return remap(sinceOn - e.attackTime, 0.0, e.decayTime, e.attackAmplitude, e.sustainAmplitude)
+      return remap(sinceOn - e.attackTime, 0.0, e.decayTime, e.attackVolume, e.sustainVolume)
     else:
       #if e.sustainAmplitude == 0:
         #n.active = false
-      return e.sustainAmplitude
+      return e.sustainVolume
   else:
     let sinceOff = curTime - n.offTime
     if sinceOff <= e.releaseTime:
-      var startAmplitude = e.sustainAmplitude
+      var startVolume = e.sustainVolume
       if sinceOn <= e.attackTime:
-        startAmplitude = remap(sinceOn, 0.0, e.attackTime, 0.0, e.attackAmplitude)
+        startVolume = remap(sinceOn, 0.0, e.attackTime, 0.0, e.attackVolume)
       elif sinceOn <= e.attackTime + e.decayTime:
-        startAmplitude = remap(sinceOn - e.attackTime, 0.0, e.decayTime, e.attackAmplitude, e.sustainAmplitude)
-      return remap(sinceOff, 0.0, e.releaseTime, startAmplitude, 0.0)
+        startVolume = remap(sinceOn - e.attackTime, 0.0, e.decayTime, e.attackVolume, e.sustainVolume)
+      #echo startVolume
+      return remap(sinceOff, 0.0, e.releaseTime, startVolume, 0.0)
     else:
       n.active = false
       return 0.0
@@ -100,10 +105,17 @@ proc finalSample(s: ref Synth): float =
         result += osc.volume * envelopeVolume * osc.sampler(globalt, finalFrequency)
   result /= noteCount.toFloat()
   result /= s.oscillators.len.toFloat()
-  result *= s.volume # apply master volume
+  result *= s.volume # apply synth volume
   # cleanup the notes seq
   while s.activeNotes.len > 0 and  not s.activeNotes[^1].active:
     discard s.activeNotes.pop()
+
+proc allSynthFinalSamples(): float =
+  for syn in synths:
+    result += syn.finalSample()
+  result /= synths.len.toFloat()
+  result *= masterVolume # apply master volume
+  result = clamp(result, -1.0, 1.0)
 
 # where the magic happens: fills the audio device's buffer with our synth sample every time it requests new information
 proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
@@ -111,12 +123,10 @@ proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
   let arr = cast[ptr UncheckedArray[int16]](buffer)
   withLock(audioMutex): # this may introduce latency, might be better to lock each note processing
     for i in 0..<frames:
-      arr[i] = 0
-      for syn in synths:
-        let sample = syn.finalSample()
-        arr[i] += int16(high(int16).toFloat()*(sample)) # TODO: there may be many synthesizers, so we need to divide this value by the amount of active synths
-        #for lfo in syn.lfos:
-          #lfo() # invoke each lfo
+      let bits = int16(high(int16).toFloat()*(allSynthFinalSamples()))
+      arr[i] = bits 
+      if recording:
+        captureBuffer.add(bits)
       globalt += dt
       if globalt > 2*PI*baseFreq: globalt -= 2*PI*baseFreq # might be a problem
           
@@ -143,13 +153,8 @@ proc init*(s: ref Synth) =
     setAudioStreamBufferSizeDefault(maxSamplesPerUpdate)
   #s.oscillators.add(Oscilator(sampler: oscSine, envelope: EnvelopeADSR(attackTime: 0.1, attackAmplitude: 1.0, decayTime: 0.2, sustainAmplitude: 0.7, releaseTime: 1.0)))
   #s.oscillators.add(Oscillator(sampler: oscNoise, envelope: EnvelopeADSR(attackTime: 0.02, attackAmplitude: 1.0, decayTime: 0.1, sustainAmplitude: 0.0, releaseTime: 0.0)))
-  s.oscillators.add(Oscillator(sampler: oscSine, envelope: EnvelopeADSR(attackTime: 1.0, attackAmplitude: 1.0, decayTime: 0.0, sustainAmplitude: 0.1, releaseTime: 1.0)))
-  # s.oscillators.add(Oscillator(sampler: oscSine, tonalOffset: 5.0, envelope: EnvelopeADSR(attackTime: 0.02, attackAmplitude: 1.0, decayTime: 0.1, sustainAmplitude: 0.0, releaseTime: 0.0)))
-  # s.oscillators.add(Oscillator(sampler: oscSine, tonalOffset: 12.0, envelope: EnvelopeADSR(attackTime: 0.02, attackAmplitude: 1.0, decayTime: 0.1, sustainAmplitude: 0.0, releaseTime: 0.0)))
-  # s.oscillators.add(Oscillator(sampler: oscTriangle, tonalOffset: -12.0, envelope: EnvelopeADSR(attackTime: 0.02, attackAmplitude: 1.0, decayTime: 0.1, sustainAmplitude: 0.0, releaseTime: 0.0)))
-  # s.oscillators.add(Oscilator(sampler: oscTriangle, volume: 0.5))
-  # s.oscillators.add(Oscilator(sampler: oscSine, tonalOffset: -12.0)) # one octave higher
-  # s.oscillators.add(Oscilator(sampler: oscNoise, volume: 0.2)) # one octave higher
+  s.oscillators.add(Oscillator(sampler: oscSine, envelope: EnvelopeADSR(attackTime: 100.0, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 100.0)))
+  s.oscillators.add(Oscillator(sampler: oscSquare, tonalOffset: 12.0, envelope: EnvelopeADSR(attackTime: 100.0, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 1.0)))
   s.volume = masterVolume
   initLock audioMutex
   # Init raw audio stream (sample rate: 44100, sample size: 16bit-short, channels: 1-mono)
@@ -160,9 +165,23 @@ proc init*(s: ref Synth) =
     playAudioStream(stream)
   synths.add(s)
 
+proc startRecording*() =
+  echo "started recording"
+  withLock(audioMutex):
+    recording = true
+
+proc stopRecording*() =
+  withLock(audioMutex):
+    recording = false
+    outputWave.data = captureBuffer[0].addr
+    let micros = now().format("ffffff")
+    if not exportWave(outputWave, &"{micros}.wav"):
+      echo "ERROR: could not export wave"
+    outputWave.data = nil
+    captureBuffer.reset()
+
 # TODO: abstract away the id to the user
 proc noteOn*(s: ref Synth; tone: Semitone; velocity: float = 1.0): Natural = 
-  #echo "main thread id: ", getThreadId()
   echo &"activating note with id: {s.activeNotes.len}, and tone of: {tone}"
   withLock(audioMutex):
     echo "got past lock after note on..."
