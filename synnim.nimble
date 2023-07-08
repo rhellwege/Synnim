@@ -10,4 +10,4 @@ bin           = @["synnim"]
 
 # Dependencies
 
-requires "nim >= 1.9.5", "naylib", "sdl2"
+requires "nim >= 1.9.5", "naylib"
