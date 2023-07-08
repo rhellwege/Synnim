@@ -24,11 +24,12 @@ proc main =
           keys[c] =  mySynth.noteOn(12)
         if isKeyReleased(Comma):
           mySynth.noteOff(keys[c])
-      if isKeyPressed(c.ord.KeyBoardKey):
-        keys[c] = mySynth.noteOn(i.Semitone)
-        echo &"activated: {keys[c]} {i.Semitone}"
-      if isKeyReleased(c.ord.KeyBoardKey):
-        mySynth.noteOff(keys[c])
+      else:
+        if isKeyPressed(c.ord.KeyBoardKey):
+          keys[c] = mySynth.noteOn(i.Semitone)
+          echo &"activated: {keys[c]} {i.Semitone}"
+        if isKeyReleased(c.ord.KeyBoardKey):
+          mySynth.noteOff(keys[c])
     
     #mySynth.noteOff()
     # ------------------------------------------------------------------------------------
