@@ -13,15 +13,27 @@ when defined(windows): # do not include windows functions that collide with the 
 # TODO: add filters (requires fft)
 # TODO: add other effects like chorus, reverb, distortion, ...
 # TODO: add draw and update functions that accept a rectangle to adaptively draw a representation of controls to the screen
-
+# private constants
 type
   Hz* = float
   Semitone* = float
+
+const
+  sampleRate = 44100 # Hz
+  maxSamplesPerUpdate = 4096
+  masterVolume = 1.0
+  tonalSystem = 12      # 12 semitone system
+  tonalroot2 = pow(2.0, 1.0 / tonalSystem.float)
+  baseFreq: Hz = 110.0 # low A
+  keyMapping: seq[KeyBoardKey] = @[Z, S, X, C, F, V, G, B, N, J, M, K, Comma, L, Period] # for input
+
+type
   Note = object
-    id: Natural # used to delete itself
+    #id: Natural # used to delete itself
     tone: Semitone = 0
     onTime: float = 0
     offTime: float = 0
+    offVolume: float = 0
     velocity: float = 0
     active: bool = true
   EnvelopeADSR* = object
@@ -38,21 +50,14 @@ type
     timeOffset*: float = 0
     volume*: float = 1.0
     envelope*: EnvelopeADSR
+    
   Synth* = object
     freqOffset*: Hz = 0
     volume*: float = 0
     oscillators*: seq[Oscillator] = @[]
-    envelope*: EnvelopeADSR # this is the master envelope
-    activeNotes: seq[Note] = @[]
-    
-# private constants
-const
-  sampleRate = 44100 # Hz
-  maxSamplesPerUpdate = 4096
-  masterVolume = 1.0
-  tonalSystem = 12      # 12 semitone system
-  tonalroot2 = pow(2.0, 1.0 / tonalSystem.float)
-  baseFreq: Hz = 261.63 # middle C
+    noteIds: seq[seq[ptr Note]] = @[]
+    activeNotes: seq[tuple[note: Note, oscillator: ptr Oscillator]] = @[]
+    activeKeyIds: array[keyMapping.len, tuple[startId: int, endId: int]]
 
 # static variables
 var
@@ -68,56 +73,52 @@ var
 converter toFreq(s: Semitone): Hz =
   return Hz baseFreq * pow(tonalroot2, s)
 
-proc getEnvelopeVolume(n: var Note, e: EnvelopeADSR): float = # this may mark the note for deletion
+proc applyEnvelope(n: var Note, e: EnvelopeADSR): float = # we need to change the structure of the oscilators and the notes
   let curTime = cpuTime()
   let sinceOn = curTime - n.onTime
   if n.onTime > n.offTime: # the user is holding the note
     if sinceOn <= e.attackTime:
-      return remap(sinceOn, 0.0, e.attackTime, 0.0, e.attackVolume)
+      n.offVolume = remap(sinceOn, 0.0, e.attackTime, 0.0, e.attackVolume)
+      return n.offVolume
     elif sinceOn <= e.attackTime + e.decayTime:
-      return remap(sinceOn - e.attackTime, 0.0, e.decayTime, e.attackVolume, e.sustainVolume)
+      n.offVolume = remap(sinceOn - e.attackTime, 0.0, e.decayTime, e.attackVolume, e.sustainVolume)
+      return n.offVolume
     else:
-      #if e.sustainAmplitude == 0:
-        #n.active = false
+      n.offVolume = e.sustainVolume
       return e.sustainVolume
   else:
     let sinceOff = curTime - n.offTime
     if sinceOff <= e.releaseTime:
-      var startVolume = e.sustainVolume
-      if sinceOn <= e.attackTime:
-        startVolume = remap(sinceOn, 0.0, e.attackTime, 0.0, e.attackVolume)
-      elif sinceOn <= e.attackTime + e.decayTime:
-        startVolume = remap(sinceOn - e.attackTime, 0.0, e.decayTime, e.attackVolume, e.sustainVolume)
-      #echo startVolume
-      return remap(sinceOff, 0.0, e.releaseTime, startVolume, 0.0)
+      return remap(sinceOff, 0.0, e.releaseTime, n.offVolume, 0.0)
     else:
+      echo "deactivating note..."
       n.active = false
       return 0.0
 
 proc finalSample(s: ref Synth): float =
   var noteCount = 0
-  for osc in s.oscillators:
-    for note in s.activeNotes.mitems():
-      if note.active: # TODO: replace this line with a pass to an envelope and multiply that with osc
-        inc noteCount
-        let envelopeVolume = note.getEnvelopeVolume(osc.envelope) # TODO: figure out master envelope vs envelope per oscillator
-        let finalFrequency = (note.tone + osc.tonalOffset).toFreq() + osc.freqOffset
-        result += osc.volume * envelopeVolume * osc.sampler(globalt, finalFrequency)
-  result /= noteCount.toFloat()
-  result /= s.oscillators.len.toFloat()
+  for note, osc in s.activeNotes.mitems():
+    if note.active:
+      inc notecount
+      let noteVolume = note.applyEnvelope(osc.envelope) * osc.volume
+      let finalFrequency = (note.tone + osc.tonalOffset).toFreq() + osc.freqOffset
+      result += noteVolume * osc.sampler(globalt, finalFrequency)
+  if noteCount > 0:
+    result /= noteCount.toFloat() # normalize each notes volume
   result *= s.volume # apply synth volume
   # cleanup the notes seq
-  while s.activeNotes.len > 0 and  not s.activeNotes[^1].active:
+  while s.activeNotes.len > 0 and not s.activeNotes[^1].note.active:
     discard s.activeNotes.pop()
 
 proc allSynthFinalSamples(): float =
   for syn in synths:
     result += syn.finalSample()
-  result /= synths.len.toFloat()
+  if synths.len() > 0:
+    result /= synths.len.toFloat() # normalize the samples volume
   result *= masterVolume # apply master volume
   result = clamp(result, -1.0, 1.0)
 
-# where the magic happens: fills the audio device's buffer with our synth sample every time it requests new information
+# where the magic happens: entry point to all mixing starts here.
 proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
   const dt = 1/sampleRate.float
   let arr = cast[ptr UncheckedArray[int16]](buffer)
@@ -181,16 +182,27 @@ proc stopRecording*() =
     captureBuffer.reset()
 
 # TODO: abstract away the id to the user
-proc noteOn*(s: ref Synth; tone: Semitone; velocity: float = 1.0): Natural = 
+proc noteOn*(s: ref Synth; tone: Semitone; velocity: float = 1.0): tuple[startId: int, endId: int] = 
   echo &"activating note with id: {s.activeNotes.len}, and tone of: {tone}"
   withLock(audioMutex):
+    let curTime = cpuTime()
+    let startId = s.activeNotes.len
+    result = (startId: startId, endId: s.activeNotes.len + s.oscillators.len - 1)
     echo "got past lock after note on..."
-    result = s.activeNotes.len
-    s.activeNotes.add(Note(id: result, velocity: velocity, tone: tone,
-        onTime: cpuTime(), offTime: 0))
-    echo &"sent note: {s.activeNotes[^1]}"
+    for osc in s.oscillators:
+      s.activeNotes.add((note: Note(velocity: velocity, tone: tone, onTime: curTime, offTime: 0), oscillator: addr osc))
+    echo &"sent note: {s.activeNotes[^1]}, ids: {result}"
 
-proc noteOff*(s: ref Synth, id: Natural) =
+proc noteOff*(s: ref Synth, ids: tuple[startId: int, endId: int]) =
   withLock(audioMutex):
-    s.activeNotes[id].offTime = cpuTime()
-  echo &"turned off noteid {id}"
+    for i in countup(ids.startId, ids.endId):
+      s.activeNotes[i].note.offTime = cpuTime()
+  echo &"turned off noteids: {ids}"
+
+proc handleInput*(s: ref Synth) =
+  for i, key in keyMapping.pairs:
+    if isKeyPressed(key):
+      s.activeKeyIds[i] = s.noteOn(i.Semitone)
+    if isKeyReleased(key):
+      s.noteOff(s.activeKeyIds[i])
+
