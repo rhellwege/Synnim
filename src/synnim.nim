@@ -1,5 +1,6 @@
 import raylib, std/[math, strformat, times]
 import "synth.nim"
+import "gui.nim"
 
 const
   screenWidth = 800
@@ -9,6 +10,7 @@ proc main =
   # Initialization
   # --------------------------------------------------------------------------------------
   initWindow(screenWidth, screenHeight, "Synnim")
+  let screenRect = Rectangle(x: 0, y: 0, width: screenWidth, height: screenHeight)
   defer: closeWindow() # Close window and OpenGL context
   var mySynth = new Synth
   mySynth.init()
@@ -18,11 +20,8 @@ proc main =
   # Main game loop
   var keys: array[char, int]
   while not windowShouldClose(): # Detect window close button or ESC key
-    if isKeyPressed(One):
-      startRecording()
-    elif isKeyPressed(Two):
-      stopRecording()
     mySynth.handleInput()
+    drawAnalyzerToRect(screenRect)
     
     #mySynth.noteOff()
     # ------------------------------------------------------------------------------------

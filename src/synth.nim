@@ -8,6 +8,7 @@ when compileoption("profiler"):
 when defined(windows): # do not include windows functions that collide with the raylib namespace
   {.localPassc: "-DNODRAWTEXT".} # TODO: Apply patch to raylib.h that adds #undef LoadImage on install
 
+# TODO: refactor global variables to a context struct for readability
 # TODO: add LFO's to oscillators
 # TODO: add instrument type, and have constants that define oscillators and envelopes
 # TODO: add filters (requires fft)
@@ -21,11 +22,16 @@ type
 const
   sampleRate = 44100 # Hz
   maxSamplesPerUpdate = 4096
-  masterVolume = 1.0
+  masterVolume = 0.5
   tonalSystem = 12      # 12 semitone system
   tonalroot2 = pow(2.0, 1.0 / tonalSystem.float)
   baseFreq: Hz = 110.0 # low A
   keyMapping: seq[KeyBoardKey] = @[Z, S, X, C, F, V, G, B, N, J, M, K, Comma, L, Period] # for input
+  startRecordingKey: KeyBoardKey = One
+  stopRecordingKey: KeyBoardKey = Two
+  noteDeactivateThresh: float = 0.001
+  maxSnapshotSamples = 256 * 256 * 256
+  maxSampleHeight = 32_000
 
 type
   Note = object
@@ -50,28 +56,37 @@ type
     timeOffset*: float = 0
     volume*: float = 1.0
     envelope*: EnvelopeADSR
-    
   Synth* = object
     freqOffset*: Hz = 0
     volume*: float = 0
     oscillators*: seq[Oscillator] = @[]
     noteIds: seq[seq[ptr Note]] = @[]
     activeNotes: seq[tuple[note: Note, oscillator: ptr Oscillator]] = @[]
-    activeKeyIds: array[keyMapping.len, tuple[startId: int, endId: int]]
+    activeKeyIds: array[keyMapping.len, tuple[ids: tuple[startId: int, endId: int], held: bool]]
 
 # static variables
 var
   globalt: float = 0
   stream: AudioStream
   synths: seq[ref Synth]
+  recording: bool = false
   audioMutex: Lock
-  recording: bool
-  captureBuffer: seq[int16]
-  # outputwave has to have a global lifetime since =destroy calls unloadWave which frees the data pointer (captureBuffer)
-  outputWave: Wave = Wave(sampleSize: 16, sampleRate: sampleRate, channels: 1, frameCount: uint32 captureBuffer.len(), data: nil)
+  snapshotMutex: Lock
+  recordBuffer: seq[int16]
+  recordToSnapshot: bool = false
+  snapshotBuffer: ptr UncheckedArray[int16]
+  snapshotSize: Natural = 0
+  snapshotIdx: Natural = 0
+  outputWave: Wave = Wave(sampleSize: 16, sampleRate: sampleRate, channels: 1, data: nil)
 
-converter toFreq(s: Semitone): Hz =
+converter toFreq*(s: Semitone): Hz =
   return Hz baseFreq * pow(tonalroot2, s)
+
+func sampleToInt16*(sample: float): int16 =
+  return int16(maxSampleHeight.toFloat()*sample)
+
+func int16ToSample*(bits: int16): float =
+  return bits.toFloat()/maxSampleHeight.toFloat()
 
 proc applyEnvelope(n: var Note, e: EnvelopeADSR): float = # we need to change the structure of the oscilators and the notes
   let curTime = cpuTime()
@@ -88,24 +103,22 @@ proc applyEnvelope(n: var Note, e: EnvelopeADSR): float = # we need to change th
       return e.sustainVolume
   else:
     let sinceOff = curTime - n.offTime
-    if sinceOff <= e.releaseTime:
-      return remap(sinceOff, 0.0, e.releaseTime, n.offVolume, 0.0)
+    result = remap(sinceOff, 0.0, e.releaseTime, n.offVolume, 0.0)
+    if sinceOff <= e.releaseTime and result > noteDeactivateThresh:
+      return
     else:
       echo "deactivating note..."
       n.active = false
       return 0.0
 
 proc finalSample(s: ref Synth): float =
-  var noteCount = 0
   for note, osc in s.activeNotes.mitems():
     if note.active:
-      inc notecount
       let noteVolume = note.applyEnvelope(osc.envelope) * osc.volume
       let finalFrequency = (note.tone + osc.tonalOffset).toFreq() + osc.freqOffset
       result += noteVolume * osc.sampler(globalt, finalFrequency)
-  if noteCount > 0:
-    result /= noteCount.toFloat() # normalize each notes volume
   result *= s.volume # apply synth volume
+  #result = normalize(result, -1.0, 1.0)
   # cleanup the notes seq
   while s.activeNotes.len > 0 and not s.activeNotes[^1].note.active:
     discard s.activeNotes.pop()
@@ -113,10 +126,24 @@ proc finalSample(s: ref Synth): float =
 proc allSynthFinalSamples(): float =
   for syn in synths:
     result += syn.finalSample()
-  if synths.len() > 0:
-    result /= synths.len.toFloat() # normalize the samples volume
   result *= masterVolume # apply master volume
-  result = clamp(result, -1.0, 1.0)
+  #result = normalize(result, -1.0, 1.0)
+
+proc startSnapshot(buffer: openArray[int16], l: Natural = buffer.len) = # this is only called from cpu thread
+  withLock(audioMutex):
+    recordToSnapshot = true
+    snapshotSize = l
+    snapshotBuffer = cast[ptr UncheckedArray[int16]](addr buffer[0])
+    snapshotIdx = 0
+    acquire(snapshotMutex)
+
+# this needs to be forward declared so the audio callback knows what to call
+proc endSnapshot() = # this is only called from the audio thread
+  recordToSnapshot = false
+  snapshotSize = 0
+  snapshotBuffer = nil
+  snapshotIdx = 0
+  release(snapshotMutex)
 
 # where the magic happens: entry point to all mixing starts here.
 proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
@@ -124,10 +151,16 @@ proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
   let arr = cast[ptr UncheckedArray[int16]](buffer)
   withLock(audioMutex): # this may introduce latency, might be better to lock each note processing
     for i in 0..<frames:
-      let bits = int16(high(int16).toFloat()*(allSynthFinalSamples()))
+      let bits = sampleToInt16(allSynthFinalSamples())
       arr[i] = bits 
       if recording:
-        captureBuffer.add(bits)
+        recordBuffer.add(bits)
+      if recordToSnapshot:
+        if snapshotIdx < snapshotSize:
+          snapshotBuffer[snapshotIdx] = bits
+          inc snapshotIdx
+        else:
+          endSnapshot()
       globalt += dt
       if globalt > 2*PI*baseFreq: globalt -= 2*PI*baseFreq # might be a problem
           
@@ -152,12 +185,12 @@ proc init*(s: ref Synth) =
   if not isAudioDeviceReady():
     initAudioDevice()
     setAudioStreamBufferSizeDefault(maxSamplesPerUpdate)
-  #s.oscillators.add(Oscilator(sampler: oscSine, envelope: EnvelopeADSR(attackTime: 0.1, attackAmplitude: 1.0, decayTime: 0.2, sustainAmplitude: 0.7, releaseTime: 1.0)))
-  #s.oscillators.add(Oscillator(sampler: oscNoise, envelope: EnvelopeADSR(attackTime: 0.02, attackAmplitude: 1.0, decayTime: 0.1, sustainAmplitude: 0.0, releaseTime: 0.0)))
-  s.oscillators.add(Oscillator(sampler: oscSine, envelope: EnvelopeADSR(attackTime: 100.0, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 100.0)))
-  s.oscillators.add(Oscillator(sampler: oscSquare, tonalOffset: 12.0, envelope: EnvelopeADSR(attackTime: 100.0, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 1.0)))
+  #s.oscillators.add(Oscillator(sampler: oscTriangle, envelope: EnvelopeADSR(attackTime: 0.02, attackVolume: 1.0, decayTime: 0.1, sustainVolume: 0.0, releaseTime: 0.0)))
+  s.oscillators.add(Oscillator(sampler: oscSine, envelope: EnvelopeADSR(attackTime: 1.0, attackVolume: 1.0, decayTime: 0.3, sustainVolume: 0.9, releaseTime: 2.0)))
+  s.oscillators.add(Oscillator(sampler: oscSquare, tonalOffset: 12.0, envelope: EnvelopeADSR(attackTime: 10.0, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 1.0)))
   s.volume = masterVolume
   initLock audioMutex
+  initLock snapshotMutex
   # Init raw audio stream (sample rate: 44100, sample size: 16bit-short, channels: 1-mono)
   if not stream.isAudioStreamReady:
     stream = loadAudioStream(sampleRate, 16, 1)
@@ -174,12 +207,15 @@ proc startRecording*() =
 proc stopRecording*() =
   withLock(audioMutex):
     recording = false
-    outputWave.data = captureBuffer[0].addr
+    echo &"saving {recordBuffer.len} frames..."
+    outputWave.data = recordBuffer[0].addr
+    outputWave.frameCount = uint32 recordBuffer.len()
     let micros = now().format("ffffff")
     if not exportWave(outputWave, &"{micros}.wav"):
       echo "ERROR: could not export wave"
     outputWave.data = nil
-    captureBuffer.reset()
+    outputWave.frameCount = 0
+    recordBuffer.reset()
 
 # TODO: abstract away the id to the user
 proc noteOn*(s: ref Synth; tone: Semitone; velocity: float = 1.0): tuple[startId: int, endId: int] = 
@@ -202,7 +238,19 @@ proc noteOff*(s: ref Synth, ids: tuple[startId: int, endId: int]) =
 proc handleInput*(s: ref Synth) =
   for i, key in keyMapping.pairs:
     if isKeyPressed(key):
-      s.activeKeyIds[i] = s.noteOn(i.Semitone)
+      s.activeKeyIds[i] = (ids: s.noteOn(i.Semitone), held: true)
     if isKeyReleased(key):
-      s.noteOff(s.activeKeyIds[i])
+      s.noteOff(s.activeKeyIds[i].ids)
+  if isKeyPressed(startRecordingKey):
+    startRecording()
+  if isKeyPressed(stopRecordingKey):
+    stopRecording()
 
+# for interfacing with visuals or filters
+# NOTE: blocks thread
+proc requestSnapshot*(buffer: openArray[int16], l: Natural = buffer.len) = 
+  assert(l < maxSnapshotSamples)
+  startSnapshot(buffer, l)
+  # block this thread until endSnapshot is called
+  acquire(snapshotMutex) # this is probably dumb
+  release(snapshotMutex)
