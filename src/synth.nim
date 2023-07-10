@@ -22,7 +22,6 @@ type
 const
   sampleRate = 44100 # Hz
   maxSamplesPerUpdate = 4096
-  masterVolume = 0.5
   tonalSystem = 12      # 12 semitone system
   tonalroot2 = pow(2.0, 1.0 / tonalSystem.float)
   baseFreq: Hz = 110.0 # low A
@@ -58,14 +57,16 @@ type
     envelope*: EnvelopeADSR
   Synth* = object
     freqOffset*: Hz = 0
+    tonalOffset*: Semitone = 0.0
     volume*: float = 0
     oscillators*: seq[Oscillator] = @[]
     noteIds: seq[seq[ptr Note]] = @[]
-    activeNotes: seq[tuple[note: Note, oscillator: ptr Oscillator]] = @[]
+    activeNotes*: seq[tuple[note: Note, oscillator: ptr Oscillator]] = @[]
     activeKeyIds: array[keyMapping.len, tuple[ids: tuple[startId: int, endId: int], held: bool]]
 
 # static variables
 var
+  masterVolume* = 0.5
   globalt: float = 0
   stream: AudioStream
   synths: seq[ref Synth]
@@ -107,27 +108,21 @@ proc applyEnvelope(n: var Note, e: EnvelopeADSR): float = # we need to change th
     if sinceOff <= e.releaseTime and result > noteDeactivateThresh:
       return
     else:
-      echo "deactivating note..."
       n.active = false
       return 0.0
 
-proc finalSample(s: ref Synth): float =
-  for note, osc in s.activeNotes.mitems():
-    if note.active:
-      let noteVolume = note.applyEnvelope(osc.envelope) * osc.volume
-      let finalFrequency = (note.tone + osc.tonalOffset).toFreq() + osc.freqOffset
-      result += noteVolume * osc.sampler(globalt, finalFrequency)
-  result *= s.volume # apply synth volume
-  #result = normalize(result, -1.0, 1.0)
-  # cleanup the notes seq
-  while s.activeNotes.len > 0 and not s.activeNotes[^1].note.active:
-    discard s.activeNotes.pop()
-
-proc allSynthFinalSamples(): float =
+proc finalSample(): float =
   for syn in synths:
-    result += syn.finalSample()
+    for note, osc in syn.activeNotes.mitems():
+      if note.active:
+        let noteVolume = note.applyEnvelope(osc.envelope) * osc.volume
+        let finalFrequency = (note.tone + osc.tonalOffset + syn.tonalOffset).toFreq() + osc.freqOffset + syn.freqOffset
+        result += noteVolume * osc.sampler(globalt, finalFrequency)
+    result *= syn.volume # apply synth volume
+    # cleanup the notes seq
+    while syn.activeNotes.len > 0 and not syn.activeNotes[^1].note.active:
+      discard syn.activeNotes.pop()
   result *= masterVolume # apply master volume
-  #result = normalize(result, -1.0, 1.0)
 
 proc startSnapshot(buffer: openArray[int16], l: Natural = buffer.len) = # this is only called from cpu thread
   withLock(audioMutex):
@@ -151,7 +146,7 @@ proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
   let arr = cast[ptr UncheckedArray[int16]](buffer)
   withLock(audioMutex): # this may introduce latency, might be better to lock each note processing
     for i in 0..<frames:
-      let bits = sampleToInt16(allSynthFinalSamples())
+      let bits = sampleToInt16(finalSample())
       arr[i] = bits 
       if recording:
         recordBuffer.add(bits)
@@ -162,7 +157,7 @@ proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
         else:
           endSnapshot()
       globalt += dt
-      if globalt > 2*PI*baseFreq: globalt -= 2*PI*baseFreq # might be a problem
+      if globalt > 1: globalt -= 1 # might be a problem
           
 proc oscSine(t: float, f: Hz): float =
   result = sin(2*PI*f*t)
@@ -172,7 +167,7 @@ proc oscTriangle(t: float, f: Hz): float =
 
 proc oscSquare(t: float, f: Hz): float =
   result = sin(2*PI*f*t)
-  result = if result < 0.5: -1.0 else: 1.0
+  result = if result < 0.0: -1.0 else: 1.0
 
 proc oscSawtooth(t: float, f: Hz): float =
   result = (2*t*f mod 2.0) - 1.0
@@ -185,9 +180,9 @@ proc init*(s: ref Synth) =
   if not isAudioDeviceReady():
     initAudioDevice()
     setAudioStreamBufferSizeDefault(maxSamplesPerUpdate)
-  #s.oscillators.add(Oscillator(sampler: oscTriangle, envelope: EnvelopeADSR(attackTime: 0.02, attackVolume: 1.0, decayTime: 0.1, sustainVolume: 0.0, releaseTime: 0.0)))
-  s.oscillators.add(Oscillator(sampler: oscSine, envelope: EnvelopeADSR(attackTime: 1.0, attackVolume: 1.0, decayTime: 0.3, sustainVolume: 0.9, releaseTime: 2.0)))
-  s.oscillators.add(Oscillator(sampler: oscSquare, tonalOffset: 12.0, envelope: EnvelopeADSR(attackTime: 10.0, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 1.0)))
+  s.oscillators.add(Oscillator(sampler: oscTriangle, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 0.1, sustainVolume: 0.0, releaseTime: 0.1)))
+  s.oscillators.add(Oscillator(sampler: oscSquare, envelope: EnvelopeADSR(attackTime: 0.3, attackVolume: 0.1, decayTime: 0.3, sustainVolume: 0.9, releaseTime: 2.0)))
+  s.oscillators.add(Oscillator(sampler: oscSine, tonalOffset: 0.0, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 0.1)))
   s.volume = masterVolume
   initLock audioMutex
   initLock snapshotMutex
@@ -219,21 +214,17 @@ proc stopRecording*() =
 
 # TODO: abstract away the id to the user
 proc noteOn*(s: ref Synth; tone: Semitone; velocity: float = 1.0): tuple[startId: int, endId: int] = 
-  echo &"activating note with id: {s.activeNotes.len}, and tone of: {tone}"
   withLock(audioMutex):
     let curTime = cpuTime()
     let startId = s.activeNotes.len
     result = (startId: startId, endId: s.activeNotes.len + s.oscillators.len - 1)
-    echo "got past lock after note on..."
     for osc in s.oscillators:
       s.activeNotes.add((note: Note(velocity: velocity, tone: tone, onTime: curTime, offTime: 0), oscillator: addr osc))
-    echo &"sent note: {s.activeNotes[^1]}, ids: {result}"
 
 proc noteOff*(s: ref Synth, ids: tuple[startId: int, endId: int]) =
   withLock(audioMutex):
     for i in countup(ids.startId, ids.endId):
       s.activeNotes[i].note.offTime = cpuTime()
-  echo &"turned off noteids: {ids}"
 
 proc handleInput*(s: ref Synth) =
   for i, key in keyMapping.pairs:
