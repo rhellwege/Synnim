@@ -1,11 +1,7 @@
 import raylib, raymath, math, tables, locks
 import "synth.nim"
 
-const
-  snapshotSize: Natural = 256*256*25
-
 var
-  snapshotBuffer: array[snapshotSize, int16]
   activeComponentTable: Table[pointer, bool]
 
 # imgui style

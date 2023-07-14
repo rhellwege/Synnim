@@ -32,7 +32,6 @@ const
   startRecordingKey: KeyBoardKey = One
   stopRecordingKey: KeyBoardKey = Two
   noteDeactivateThresh: float = 0.001
-  maxSnapshotSamples = 256 * 256 * 256
   maxSampleHeight = 32_000
 
 type
@@ -64,7 +63,7 @@ type
     sampler*: OscillatorSampler
     `low`: float
     `high`: float
-    modifier: ptr float
+    modifier: ptr float # maybe we should make this an array, also should we be using pointers?
     initialValue: float = 0.0
   AudioFilterProc = proc(a: var AudioFilter, sample: float): float # take a sample, do math, save the previus results inside the filter
   AudioFilter* = object
@@ -91,12 +90,7 @@ var
   synths: seq[ref Synth]
   recording: bool = false
   audioMutex*: Lock
-  snapshotMutex: Lock # do we need snapshots?
   recordBuffer: seq[int16]
-  recordToSnapshot: bool = false
-  snapshotBuffer: ptr UncheckedArray[int16]
-  snapshotSize: Natural = 0
-  snapshotIdx: Natural = 0
   outputWave: Wave = Wave(sampleSize: 16, sampleRate: sampleRate, channels: 1, data: nil)
   # filtering
   prevSample: float = 0.0
@@ -133,22 +127,6 @@ proc applyEnvelope(n: var Note, e: EnvelopeADSR) = # we need to change the struc
     else:
       n.active = false
       n.volume = 0.0
-
-proc startSnapshot(buffer: openArray[int16], l: Natural = buffer.len) = # this is only called from cpu thread
-  withLock(audioMutex):
-    recordToSnapshot = true
-    snapshotSize = l
-    snapshotBuffer = cast[ptr UncheckedArray[int16]](addr buffer[0])
-    snapshotIdx = 0
-    acquire(snapshotMutex)
-
-# this needs to be forward declared so the audio callback knows what to call
-proc endSnapshot() = # this is only called from the audio thread
-  recordToSnapshot = false
-  snapshotSize = 0
-  snapshotBuffer = nil
-  snapshotIdx = 0
-  release(snapshotMutex)
 
 proc oscSine(t: float, f: Hz): float =
   result = sin(2*PI*f*t)
@@ -226,12 +204,6 @@ proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
       arr[i] = sampleToInt16(curSample) # set the sample in the buffer
       if recording:
         recordBuffer.add(sampleToInt16(curSample))
-      if recordToSnapshot:
-        if snapshotIdx < snapshotSize:
-          snapshotBuffer[snapshotIdx] = sampleToInt16(curSample)
-          inc snapshotIdx
-        else:
-          endSnapshot()
       globalt += dt
     #lowPass(buffer, frames, 0.01)
 
@@ -244,10 +216,15 @@ proc init*(s: ref Synth) =
   s.oscillators.add(Oscillator(sampler: oscSine, tonalOffset: 0, envelope: EnvelopeADSR(attackTime: 0.3, attackVolume: 0.9, decayTime: 0.3, sustainVolume: 0.9, releaseTime: 0.2)))
   s.oscillators.add(Oscillator(volume: 0.5, sampler: oscSawtooth, tonalOffset: 0.0, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 0.1)))
   s.filters.add(AudioFilter(filterProc: filterLowPass))
+  s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 3.0, freq: 1.0, modifier: addr s.tonalOffset))
+  s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 7.0, freq: 2.0))
+  s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 12.0, freq: 4.0))
+  s.lfos[1].modifier = addr s.lfos[0].initialValue
+  s.lfos[2].modifier = addr s.lfos[1].initialValue
+  s.lfos.add(Lfo(sampler: oscSine, freq: 16.0, `low`: 0.1, `high`: 1.0, modifier: addr s.filters[0].alpha))
   s.volume = masterVolume
   # s.lfos.add(Lfo(sampler: oscTriangle, `low`: 0.0, `high`: 12.0, freq: 0.1, modifier: addr s.tonalOffset))
   initLock audioMutex
-  initLock snapshotMutex
   # Init raw audio stream (sample rate: 44100, sample size: 16bit-short, channels: 1-mono)
   if not stream.isAudioStreamReady:
     stream = loadAudioStream(sampleRate, 16, 1)
@@ -298,12 +275,3 @@ proc handleInput*(s: ref Synth) =
     startRecording()
   if isKeyPressed(stopRecordingKey):
     stopRecording()
-
-# for interfacing with visuals or filters
-# NOTE: blocks thread
-proc requestSnapshot*(buffer: openArray[int16], l: Natural = buffer.len) = 
-  assert(l < maxSnapshotSamples)
-  startSnapshot(buffer, l)
-  # block this thread until endSnapshot is called
-  acquire(snapshotMutex) # this is probably dumb
-  release(snapshotMutex)
