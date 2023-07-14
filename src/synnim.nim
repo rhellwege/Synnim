@@ -29,6 +29,7 @@ proc main =
     drawAnalyzerToRect(screenRect, 5)
     drawFps(0, 0)
     knob(Vector2(x: 10, y: 20), 10.0, 0.0, 1.0, 0.01, masterVolume)
+    knob(Vector2(x: 100, y: 100), 10.0, 0.0, 1.0, 0.01, mySynth.filters[0].alpha)
     knob(Vector2(x: 50, y: 50), 30.0, -12.0, 12.0, 0.01, mySynth.tonalOffset)
     drawText(&"Active notes: {mySynth.activeNotes.len}", 300, 20, 10, Red)
     drawText(&"t: {globalt}", 300, 40, 10, Black)
