@@ -147,6 +147,7 @@ proc oscNoise(t: float, f: Hz): float =
 proc filterHighPass(a: var AudioFilter, sample: float): float =
   if a.firstSample: ## filtering
     a.prevSample = sample
+    a.prevFilteredSample = sample
     a.firstSample = false
     return sample # first iteration, return the sample as is
   else: # still filtering
@@ -154,10 +155,12 @@ proc filterHighPass(a: var AudioFilter, sample: float): float =
     result = a.alpha * (a.prevFilteredSample + sample - a.prevSample)
     a.prevFilteredSample = result
     a.prevSample = temp
+    
 
 proc filterLowPass(a: var AudioFilter, sample: float): float =
   if a.firstSample: ## filtering
     a.prevSample = sample
+    a.prevFilteredSample = sample
     a.firstSample = false
     return sample # first iteration, return the sample as is
   else: # still filtering
@@ -234,7 +237,7 @@ proc init*(s: ref Synth) =
   s.oscillators.add(Oscillator(volume: 0.5, sampler: oscSawtooth, tonalOffset: 0.0, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 0.1)))
   s.filters.add(AudioFilter(filterProc: filterLowPass))
   s.filters.add(AudioFilter(filterProc: filterHighPass))
-  # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 3.0, freq: 1.0, modifier: addr s.tonalOffset))
+  # # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 3.0, freq: 1.0, modifier: addr s.tonalOffset))
   # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 7.0, freq: 2.0))
   # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 12.0, freq: 4.0))
   # s.lfos[1].modifier = addr s.lfos[0].initialValue
