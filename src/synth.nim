@@ -68,7 +68,7 @@ type
   AudioFilterProc = proc(a: var AudioFilter, sample: float): float # take a sample, do math, save the previus results inside the filter
   AudioFilter* = object
     filterProc*: AudioFilterProc
-    alpha*: float = 0.0 # value between 0 and 1, determines the 'strength' of the filter
+    alpha*: float = 1.0 # value between 0 and 1, determines the 'strength' of the filter
     firstSample: bool = true
     prevSample: float = 0.0
     prevFilteredSample: float = 0.0
@@ -170,7 +170,7 @@ proc applyLfo*(l: var Lfo, t: float) = # ensure that modifier is valid memory
   let sample = l.sampler(l.freq, t)
   l.modifier[] = l.initialValue + remap(sample, -1.0, 1.0, l.`low`, l.`high`)
 
-proc finalSample*(t: float): float  = # TODO: make this proc private, and add a user api, which does not modify any information, and allows the user to pass a proc lambda
+proc finalSample(t: float): float = # TODO: make this proc private, and add a user api, which does not modify any information, and allows the user to pass a proc lambda
   for syn in synths:
     for note, oscIndex in syn.activeNotes.items():
       if note.active:
@@ -178,10 +178,27 @@ proc finalSample*(t: float): float  = # TODO: make this proc private, and add a 
         result += note.volume * syn.oscillators[oscIndex].sampler(t, finalFrequency)
     result *= syn.volume # apply synth volume
     # apply filtering on the result, rendering loop may mess with the filtering, which will introduce artifacts
-    # for filter in syn.filters.mitems():
-    #   result = filter.filterProc(filter, result)
+    for filter in syn.filters.mitems():
+      result = filter.filterProc(filter, result)
   result *= masterVolume # apply master volume
-  
+
+proc runSampler*(frames: Natural, dt: float, callback: proc (sample: float, sampleIdx: float)) =
+  # t is implied to be 0
+  # save the state of all synths so what we do doesnt affect anything
+  withLock(audioMutex):
+    var savedFilters: seq[AudioFilter] = @[]
+    for synth in synths:
+      for filter in synth.filters.mitems():
+        savedFilters.add(filter)
+        filter.firstSample = true
+        filter.prevFilteredSample = 0.0
+    for i in 0..<frames:
+      callback(finalSample(i.toFloat()*dt), i.toFloat())
+    var index = 0
+    for synth in synths:
+      for filter in synth.filters.mitems():
+        filter = savedFilters[index]
+        inc index
 
 # where the magic happens: entry point to all mixing starts here.
 proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
@@ -198,9 +215,9 @@ proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
         discard syn.activeNotes.pop()
     for i in 0..<frames:
       var curSample = finalSample(globalt)
-      for syn in synths:
-        for filter in syn.filters.mitems():
-          curSample = filter.filterProc(filter, curSample)
+      # for syn in synths: we sample in the finalSample proc
+      #   for filter in syn.filters.mitems():
+      #     curSample = filter.filterProc(filter, curSample)
       arr[i] = sampleToInt16(curSample) # set the sample in the buffer
       if recording:
         recordBuffer.add(sampleToInt16(curSample))
@@ -216,12 +233,13 @@ proc init*(s: ref Synth) =
   s.oscillators.add(Oscillator(sampler: oscSine, tonalOffset: 0, envelope: EnvelopeADSR(attackTime: 0.3, attackVolume: 0.9, decayTime: 0.3, sustainVolume: 0.9, releaseTime: 0.2)))
   s.oscillators.add(Oscillator(volume: 0.5, sampler: oscSawtooth, tonalOffset: 0.0, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 0.1)))
   s.filters.add(AudioFilter(filterProc: filterLowPass))
-  s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 3.0, freq: 1.0, modifier: addr s.tonalOffset))
-  s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 7.0, freq: 2.0))
-  s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 12.0, freq: 4.0))
-  s.lfos[1].modifier = addr s.lfos[0].initialValue
-  s.lfos[2].modifier = addr s.lfos[1].initialValue
-  s.lfos.add(Lfo(sampler: oscSine, freq: 16.0, `low`: 0.1, `high`: 1.0, modifier: addr s.filters[0].alpha))
+  s.filters.add(AudioFilter(filterProc: filterHighPass))
+  # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 3.0, freq: 1.0, modifier: addr s.tonalOffset))
+  # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 7.0, freq: 2.0))
+  # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 12.0, freq: 4.0))
+  # s.lfos[1].modifier = addr s.lfos[0].initialValue
+  # s.lfos[2].modifier = addr s.lfos[1].initialValue
+  # s.lfos.add(Lfo(sampler: oscSine, freq: 16.0, `low`: 0.1, `high`: 1.0, modifier: addr s.filters[0].alpha))
   s.volume = masterVolume
   # s.lfos.add(Lfo(sampler: oscTriangle, `low`: 0.0, `high`: 12.0, freq: 0.1, modifier: addr s.tonalOffset))
   initLock audioMutex
@@ -257,7 +275,7 @@ proc noteOn*(s: ref Synth; tone: Semitone; velocity: float = 1.0): tuple[startId
     let curTime = cpuTime()
     let startId = s.activeNotes.len
     result = (startId: startId, endId: s.activeNotes.len + s.oscillators.len - 1)
-    for i, osc in s.oscillators.pairs:
+    for i, osc in s.oscillators.pairs():
       s.activeNotes.add((note: Note(velocity: velocity, tone: tone, onTime: curTime, offTime: 0), oscillator: Natural i))
 
 proc noteOff*(s: ref Synth, ids: tuple[startId: int, endId: int]) =
@@ -266,7 +284,7 @@ proc noteOff*(s: ref Synth, ids: tuple[startId: int, endId: int]) =
       s.activeNotes[i].note.offTime = cpuTime()
 
 proc handleInput*(s: ref Synth) =
-  for i, key in keyMapping.pairs:
+  for i, key in keyMapping.pairs():
     if isKeyPressed(key):
       s.activeKeyIds[i] = (ids: s.noteOn(i.Semitone), held: true)
     if isKeyReleased(key):
