@@ -19,6 +19,7 @@ proc main =
   setTextureFilter(backframe.texture, TextureFilter.Bilinear)
   var mySynth = new Synth
   mySynth.init()
+  const dftRect: Rectangle = Rectangle(x: 600.0, y: 350.0, width: 200.0, height: 100.0)
   #let config: Flags[ConfigFlags] = Flags(WindowResizable)
   #setConfigFlags(WindowResizable)
 
@@ -34,6 +35,7 @@ proc main =
     textureMode(backframe):
       clearBackground(RayWhite)
       drawAnalyzerToRect(screenRect, 5)
+      drawFrequenciesToRect(screenRect, 128)
       drawFps(0, 0)
       knob(Vector2(x: 10, y: 20), 10.0, 0.0, 1.0, 0.01, masterVolume)
       knob(Vector2(x: 100, y: 100), 10.0, 0.0, 1.0, 0.01, mySynth.filters[0].alpha)

@@ -1,8 +1,14 @@
-import raylib, raymath, math, tables, locks
+import raylib, raymath, math, tables, locks, complex, bitops
 import "synth.nim"
+import "signal.nim"
+
+const
+  fourierSamples: Natural = 1024
 
 var
   activeComponentTable: Table[pointer, bool]
+  samples: array[fourierSamples, float]
+  frequencies: array[fourierSamples, Complex[float]]
 
 # imgui style
 proc knob*(center: Vector2, radius: float, `low`: float, `high`: float, increment: float, modifier: var float) =
@@ -41,9 +47,27 @@ proc drawAnalyzerToRect*(r: Rectangle, wavelengths: float) =
   proc drawSampleToRect(sample: float, frameIdx: float) =
     #echo sample
     let sampleY = remap(sample, -1.0, 1.0, r.height, r.y)
-    drawPixel(Vector2(x: frameIdx, y: sampleY), Red)
+    drawPixel(Vector2(x: r.x + frameIdx, y: sampleY), Red)
 
   runSampler(r.width.Natural, dt, drawSampleToRect)
+
+proc drawFrequenciesToRect*(r: Rectangle, bands: Natural) =
+  let dt = 1/(bands)
+  assert(bands < fourierSamples and countSetBits(bands) == 1) # must be a power of 2
+
+  proc collectSamples(sample: float, frameIdx: float) =
+    samples[frameIdx.Natural] = sample
+
+  runSampler(bands, dt, collectSamples)
+
+  dft(samples, frequencies, bands)
+
+  let rw: float = r.width / bands.toFloat()
+  for i in 0..<bands:
+    let freq = remap(frequencies[i].abs(), 0.0, bands.toFloat(), 0.0, r.height)
+    #let h: float = remap(freq, 0.0, r.width, r.height, r.y)
+    drawRectangle(Vector2(x: i.toFloat() * rw, y: r.height - freq), Vector2(x: rw, y: freq), Green)
+    #drawLine(Vector2(x: r.x + i.toFloat(), y: r.y + r.height), Vector2(x: r.x + i.toFloat(), y: r.y + r.height-(freq*r.height)), Green)
 
 proc drawEnvelopeToRect*(e: EnvelopeADSR, r: Rectangle) =
   let totalTime = e.attackTime + e.decayTime + e.releaseTime

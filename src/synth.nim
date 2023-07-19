@@ -107,7 +107,7 @@ func sampleToInt16*(sample: float): int16 =
 func int16ToSample*(bits: int16): float =
   return bits.toFloat()/maxSampleHeight.toFloat()
 
-proc applyEnvelope(n: var Note, e: EnvelopeADSR) = # we need to change the structure of the oscilators and the notes
+proc applyEnvelope(n: var Note, e: EnvelopeADSR) =
   let curTime = cpuTime()
   let sinceOn = curTime - n.onTime
   if n.onTime > n.offTime: # the user is holding the note
@@ -173,7 +173,7 @@ proc applyLfo*(l: var Lfo, t: float) = # ensure that modifier is valid memory
   let sample = l.sampler(l.freq, t)
   l.modifier[] = l.initialValue + remap(sample, -1.0, 1.0, l.`low`, l.`high`)
 
-proc finalSample(t: float): float = # TODO: make this proc private, and add a user api, which does not modify any information, and allows the user to pass a proc lambda
+proc finalSample(t: float): float =
   for syn in synths:
     for note, oscIndex in syn.activeNotes.items():
       if note.active:
@@ -207,7 +207,7 @@ proc runSampler*(frames: Natural, dt: float, callback: proc (sample: float, samp
 proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
   const dt = 1/sampleRate.float
   let arr = cast[ptr UncheckedArray[int16]](buffer)
-  withLock(audioMutex): # this may introduce latency, might be better to lock each note processing
+  withLock(audioMutex):
     for syn in synths:
       for lfo in syn.lfos.mitems():
         lfo.applyLfo(globalt)
@@ -218,9 +218,6 @@ proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
         discard syn.activeNotes.pop()
     for i in 0..<frames:
       var curSample = finalSample(globalt)
-      # for syn in synths: we sample in the finalSample proc
-      #   for filter in syn.filters.mitems():
-      #     curSample = filter.filterProc(filter, curSample)
       arr[i] = sampleToInt16(curSample) # set the sample in the buffer
       if recording:
         recordBuffer.add(sampleToInt16(curSample))
@@ -232,12 +229,12 @@ proc init*(s: ref Synth) =
   if not isAudioDeviceReady():
     initAudioDevice()
     setAudioStreamBufferSizeDefault(maxSamplesPerUpdate)
-  s.oscillators.add(Oscillator(sampler: oscTriangle, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 01.0, sustainVolume: 0.0, releaseTime: 0.1)))
-  s.oscillators.add(Oscillator(sampler: oscSine, tonalOffset: 0, envelope: EnvelopeADSR(attackTime: 0.3, attackVolume: 0.9, decayTime: 0.3, sustainVolume: 0.9, releaseTime: 0.2)))
-  s.oscillators.add(Oscillator(volume: 0.5, sampler: oscSawtooth, tonalOffset: 0.0, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 0.1)))
+  #s.oscillators.add(Oscillator(sampler: oscTriangle, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 01.0, sustainVolume: 0.0, releaseTime: 0.1)))
+  s.oscillators.add(Oscillator(sampler: oscSquare, tonalOffset: 0, envelope: EnvelopeADSR(attackTime: 0.3, attackVolume: 0.9, decayTime: 0.3, sustainVolume: 0.9, releaseTime: 0.2)))
+  #s.oscillators.add(Oscillator(volume: 0.5, sampler: oscSawtooth, tonalOffset: 0.0, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 0.1)))
   s.filters.add(AudioFilter(filterProc: filterLowPass))
   s.filters.add(AudioFilter(filterProc: filterHighPass))
-  # # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 3.0, freq: 1.0, modifier: addr s.tonalOffset))
+  # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 3.0, freq: 1.0, modifier: addr s.tonalOffset))
   # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 7.0, freq: 2.0))
   # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 12.0, freq: 4.0))
   # s.lfos[1].modifier = addr s.lfos[0].initialValue
@@ -272,8 +269,7 @@ proc stopRecording*() =
     outputWave.frameCount = 0
     recordBuffer.reset()
 
-# TODO: abstract away the id to the user
-proc noteOn*(s: ref Synth; tone: Semitone; velocity: float = 1.0): tuple[startId: int, endId: int] = 
+proc noteOn(s: ref Synth; tone: Semitone; velocity: float = 1.0): tuple[startId: int, endId: int] = 
   withLock(audioMutex):
     let curTime = cpuTime()
     let startId = s.activeNotes.len
@@ -281,7 +277,7 @@ proc noteOn*(s: ref Synth; tone: Semitone; velocity: float = 1.0): tuple[startId
     for i, osc in s.oscillators.pairs():
       s.activeNotes.add((note: Note(velocity: velocity, tone: tone, onTime: curTime, offTime: 0), oscillator: Natural i))
 
-proc noteOff*(s: ref Synth, ids: tuple[startId: int, endId: int]) =
+proc noteOff(s: ref Synth, ids: tuple[startId: int, endId: int]) =
   withLock(audioMutex):
     for i in countup(ids.startId, ids.endId):
       s.activeNotes[i].note.offTime = cpuTime()
