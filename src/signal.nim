@@ -29,10 +29,8 @@ proc fftImpl(input: openArray[float], output: var openArray[Complex], N: Natural
     let e = output[k]
     output[k]           = e + v
     output[k + N div 2] = e - v
-  
 
 proc fft*(input: openArray[float], output: var openArray[Complex], N: Natural) =
   assert(countSetBits(N) == 1)
-  #zeroMem(addr output[0], N * sizeof(output[0]))
   fftImpl(input, output, N, 1)
  

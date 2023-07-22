@@ -25,5 +25,3 @@ suite "fourier":
     dft(samples, dftOutput, samples.len())
     for i, f in fftOutput.pairs():
       check(f == dftOutput[i])
-
-    #test "fft":

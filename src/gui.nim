@@ -3,12 +3,12 @@ import "synth.nim"
 import "signal.nim"
 
 const
-  fourierSamples: Natural = 1024
+  maxFourierSamples: Natural = 2048
 
 var
   activeComponentTable: Table[pointer, bool]
-  samples: array[fourierSamples, float]
-  frequencies: array[fourierSamples, Complex[float]]
+  samples: array[maxFourierSamples, float]
+  frequencies: array[maxFourierSamples, Complex[float]]
 
 # imgui style
 proc knob*(center: Vector2, radius: float, `low`: float, `high`: float, increment: float, modifier: var float) =
@@ -51,16 +51,26 @@ proc drawWavesToRect*(r: Rectangle, wavelengths: float) =
 
   runSampler(r.width.Natural, dt, drawSampleToRect)
 
-proc drawFrequenciesToRect*(r: Rectangle, bands: Natural) =
+proc drawFrequenciesToRect*(r: Rectangle, bands: Natural, showReflection: bool = false) =
   let dt = 1/(bands)
-  assert(bands < fourierSamples) # must be a power of 2
+  if showReflection:
+    assert(bands < maxFourierSamples) # must be a power of 2
+  else:
+    assert(bands * 2 < maxFourierSamples) # must be a power of 2
 
   proc collectSamples(sample: float, frameIdx: float) =
     samples[frameIdx.Natural] = sample
 
-  runSampler(bands, dt, collectSamples)
+  if showReflection:
+    runSampler(bands, dt, collectSamples)
+  else:
+    runSampler(bands * 2, dt, collectSamples)
 
-  fft(samples, frequencies, bands)
+  if showReflection:
+    fft(samples, frequencies, bands)
+  else:
+    fft(samples, frequencies, bands * 2)
+
 
   let rw: float = r.width / bands.toFloat()
   for i in 0..<bands:
