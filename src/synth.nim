@@ -9,13 +9,9 @@ when defined(windows): # do not include windows functions that collide with the 
   {.localPassc: "-DNODRAWTEXT".} # TODO: Apply patch to raylib.h that adds #undef LoadImage on install
 
 # TODO: refactor global variables to a context struct for readability
-# TODO: add LFO's to oscillators
 # TODO: add instrument type, and have constants that define oscillators and envelopes
-# TODO: add filters (requires fft)
 # TODO: add other effects like chorus, reverb, distortion, ...
-# TODO: add draw and update functions that accept a rectangle to adaptively draw a representation of controls to the screen
 
-# TODO: make low pass and high pass filters a part of the synth
 
 # private constants
 type
@@ -156,7 +152,6 @@ proc filterHighPass(a: var AudioFilter, sample: float): float =
     a.prevFilteredSample = result
     a.prevSample = temp
     
-
 proc filterLowPass(a: var AudioFilter, sample: float): float =
   if a.firstSample: ## filtering
     a.prevSample = sample

@@ -1,4 +1,4 @@
-import raylib, raymath, math, tables, locks, complex, bitops
+import raylib, raymath, math, tables, locks, complex
 import "synth.nim"
 import "signal.nim"
 
@@ -41,7 +41,7 @@ proc button*(t: string, pos: Vector2, f: float): bool =
       result = true
   return
 
-proc drawAnalyzerToRect*(r: Rectangle, wavelengths: float) =
+proc drawWavesToRect*(r: Rectangle, wavelengths: float) =
   let dt = wavelengths/(getScreenWidth().toFloat()*baseFreq)
 
   proc drawSampleToRect(sample: float, frameIdx: float) =
@@ -53,18 +53,20 @@ proc drawAnalyzerToRect*(r: Rectangle, wavelengths: float) =
 
 proc drawFrequenciesToRect*(r: Rectangle, bands: Natural) =
   let dt = 1/(bands)
-  assert(bands < fourierSamples and countSetBits(bands) == 1) # must be a power of 2
+  assert(bands < fourierSamples) # must be a power of 2
 
   proc collectSamples(sample: float, frameIdx: float) =
     samples[frameIdx.Natural] = sample
 
   runSampler(bands, dt, collectSamples)
 
-  dft(samples, frequencies, bands)
+  fft(samples, frequencies, bands)
 
   let rw: float = r.width / bands.toFloat()
   for i in 0..<bands:
-    let freq = remap(frequencies[i].abs(), 0.0, bands.toFloat(), 0.0, r.height)
+    #let freq = remap(frequencies[i].re, 0.0, bands.toFloat(), 0.0, r.height)
+    let freq = frequencies[i].abs()
+    #echo freq
     #let h: float = remap(freq, 0.0, r.width, r.height, r.y)
     drawRectangle(Vector2(x: i.toFloat() * rw, y: r.height - freq), Vector2(x: rw, y: freq), Green)
     #drawLine(Vector2(x: r.x + i.toFloat(), y: r.y + r.height), Vector2(x: r.x + i.toFloat(), y: r.y + r.height-(freq*r.height)), Green)

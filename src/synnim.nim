@@ -34,7 +34,7 @@ proc main =
     # ------------------------------------------------------------------------------------
     textureMode(backframe):
       clearBackground(RayWhite)
-      drawAnalyzerToRect(screenRect, 5)
+      drawWavesToRect(screenRect, 5)
       drawFrequenciesToRect(screenRect, 128)
       drawFps(0, 0)
       knob(Vector2(x: 10, y: 20), 10.0, 0.0, 1.0, 0.01, masterVolume)
