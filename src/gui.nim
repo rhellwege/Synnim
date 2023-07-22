@@ -11,7 +11,7 @@ var
   frequencies: array[maxFourierSamples, Complex[float]]
 
 # imgui style
-proc knob*(center: Vector2, radius: float, `low`: float, `high`: float, increment: float, modifier: var float) =
+proc knob*(center: Vector2, radius: float, `low`: float, `high`: float, increment: float, modifier: var float, thickness: float = 2.0) =
   if distance(getMousePosition(), center) <= radius:
     if isMouseButtonDown(Left):
       activeComponentTable[addr modifier] = true
@@ -19,10 +19,16 @@ proc knob*(center: Vector2, radius: float, `low`: float, `high`: float, incremen
   if isMouseButtonReleased(Left):
     activeComponentTable[addr modifier] = false
 
+  var strokeColor = Black
+
   if activeComponentTable.contains(addr modifier) and activeComponentTable[addr modifier]:
     modifier += -getMouseDelta().y * increment
     modifier = clamp(modifier, `low`, `high`)
     setMouseCursor(MouseCursor.ResizeNs)
+    strokeColor = SkyBlue
+
+  drawRing(center, radius, radius + thickness, 0, 360, 120, strokeColor)
+    #drawCircleLines(center.x.int32, center.y.int32, radius + 2, SkyBlue)
 
   drawCircle(center, radius, DarkGray)
   let angle = remap(modifier, `low`, `high`, PI/6, (2*PI)-(PI/6)) + (PI / 2)
@@ -51,35 +57,31 @@ proc drawWavesToRect*(r: Rectangle, wavelengths: float) =
 
   runSampler(r.width.Natural, dt, drawSampleToRect)
 
-proc drawFrequenciesToRect*(r: Rectangle, bands: Natural, showReflection: bool = false) =
-  let dt = 1/(bands)
+proc drawFrequenciesToRect*(r: Rectangle, bands: Natural, showReflection: bool = false, stretch: float = 1.0) =
+  var totalBands = 0
   if showReflection:
     assert(bands < maxFourierSamples) # must be a power of 2
+    totalBands = bands
   else:
     assert(bands * 2 < maxFourierSamples) # must be a power of 2
+    totalBands = bands * 2
+  let dt = 1/(bands)
 
   proc collectSamples(sample: float, frameIdx: float) =
     samples[frameIdx.Natural] = sample
 
-  if showReflection:
-    runSampler(bands, dt, collectSamples)
-  else:
-    runSampler(bands * 2, dt, collectSamples)
+  runSampler(totalBands, dt, collectSamples)
 
-  if showReflection:
-    fft(samples, frequencies, bands)
-  else:
-    fft(samples, frequencies, bands * 2)
-
+  fft(samples, frequencies, totalBands)
 
   let rw: float = r.width / bands.toFloat()
+
   for i in 0..<bands:
-    #let freq = remap(frequencies[i].re, 0.0, bands.toFloat(), 0.0, r.height)
-    let freq = frequencies[i].abs()
-    #echo freq
-    #let h: float = remap(freq, 0.0, r.width, r.height, r.y)
+    let freq = clamp(
+      stretch * r.height * 
+      (frequencies[i].abs() / totalBands.toFloat()), 
+      0, r.height)
     drawRectangle(Vector2(x: i.toFloat() * rw, y: r.height - freq), Vector2(x: rw, y: freq), Green)
-    #drawLine(Vector2(x: r.x + i.toFloat(), y: r.y + r.height), Vector2(x: r.x + i.toFloat(), y: r.y + r.height-(freq*r.height)), Green)
 
 proc drawEnvelopeToRect*(e: EnvelopeADSR, r: Rectangle) =
   let totalTime = e.attackTime + e.decayTime + e.releaseTime

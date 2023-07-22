@@ -35,7 +35,7 @@ proc main =
     textureMode(backframe):
       clearBackground(RayWhite)
       drawWavesToRect(screenRect, 5)
-      drawFrequenciesToRect(screenRect, 512)
+      drawFrequenciesToRect(screenRect, 512, stretch = 3.0)
       drawFps(0, 0)
       knob(Vector2(x: 10, y: 20), 10.0, 0.0, 1.0, 0.01, masterVolume)
       knob(Vector2(x: 100, y: 100), 10.0, 0.0, 1.0, 0.01, mySynth.filters[0].alpha)

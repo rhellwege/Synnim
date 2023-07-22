@@ -73,7 +73,6 @@ type
     tonalOffset*: Semitone = 0.0
     volume*: float = 0
     oscillators*: seq[Oscillator] = @[]
-    #noteIds: seq[seq[Natural]] = @[] # dont use pointer, use index
     activeNotes*: seq[tuple[note: Note, oscillator: Natural]] = @[] # dont use pointer, use index
     activeKeyIds: array[keyMapping.len, tuple[ids: tuple[startId: int, endId: int], held: bool]]
     lfos*: seq[Lfo] = @[]
@@ -224,17 +223,11 @@ proc init*(s: ref Synth) =
   if not isAudioDeviceReady():
     initAudioDevice()
     setAudioStreamBufferSizeDefault(maxSamplesPerUpdate)
-  #s.oscillators.add(Oscillator(sampler: oscTriangle, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 01.0, sustainVolume: 0.0, releaseTime: 0.1)))
-  s.oscillators.add(Oscillator(sampler: oscSquare, tonalOffset: 0, envelope: EnvelopeADSR(attackTime: 0.3, attackVolume: 0.9, decayTime: 0.3, sustainVolume: 0.9, releaseTime: 0.2)))
-  #s.oscillators.add(Oscillator(volume: 0.5, sampler: oscSawtooth, tonalOffset: 0.0, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 0.1)))
+  # s.oscillators.add(Oscillator(sampler: oscTriangle, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 01.0, sustainVolume: 0.0, releaseTime: 0.1)))
+  s.oscillators.add(Oscillator(sampler: oscSine, tonalOffset: 0, envelope: EnvelopeADSR(attackTime: 0.3, attackVolume: 0.9, decayTime: 0.3, sustainVolume: 0.9, releaseTime: 0.2)))
+  # s.oscillators.add(Oscillator(volume: 0.5, sampler: oscSawtooth, tonalOffset: 0.0, envelope: EnvelopeADSR(attackTime: 0.2, attackVolume: 1.0, decayTime: 0.0, sustainVolume: 1.0, releaseTime: 0.1)))
   s.filters.add(AudioFilter(filterProc: filterLowPass))
   s.filters.add(AudioFilter(filterProc: filterHighPass))
-  # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 3.0, freq: 1.0, modifier: addr s.tonalOffset))
-  # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 7.0, freq: 2.0))
-  # s.lfos.add(Lfo(sampler: oscSquare, `low`: 0.0, `high`: 12.0, freq: 4.0))
-  # s.lfos[1].modifier = addr s.lfos[0].initialValue
-  # s.lfos[2].modifier = addr s.lfos[1].initialValue
-  # s.lfos.add(Lfo(sampler: oscSine, freq: 16.0, `low`: 0.1, `high`: 1.0, modifier: addr s.filters[0].alpha))
   s.volume = masterVolume
   # s.lfos.add(Lfo(sampler: oscTriangle, `low`: 0.0, `high`: 12.0, freq: 0.1, modifier: addr s.tonalOffset))
   initLock audioMutex
