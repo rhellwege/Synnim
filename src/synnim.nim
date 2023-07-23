@@ -14,6 +14,7 @@ proc main =
   # --------------------------------------------------------------------------------------
   setConfigFlags(flags(Msaa4xHint, WindowResizable)) # window config flags
   initWindow(screenWidth, screenHeight, "Synnim")
+  initGui()
   defer: closeWindow() # Close window and OpenGL context
   let postShader = loadShaderFromMemory("", postShaderStr)
   let backframe = loadRenderTexture(screenWidth, screenHeight)
@@ -34,16 +35,7 @@ proc main =
     # Draw
     # ------------------------------------------------------------------------------------
     textureMode(backframe):
-      clearBackground(RayWhite)
-      drawWaves(getRenderRect(), 5)
-      drawFrequencies(getRenderRect(), 512, stretch = 3.0)
-      drawKnob(Vector2(x: 10, y: 20), 10.0, 0.0, 1.0, 0.01, mySynth.patch.volume)
-      drawKnob(Vector2(x: 100, y: 100), 10.0, 0.0, 1.0, 0.01, mySynth.patch.filters[0].alpha)
-      drawKnob(Vector2(x: 130, y: 100), 10.0, 0.0, 1.0, 0.01, mySynth.patch.filters[1].alpha)
-      drawKnob(Vector2(x: 50, y: 50), 30.0, -12.0, 12.0, 0.01, mySynth.patch.tonalOffset)
-      drawText(&"Active notes: {mySynth.activeNotes.len}", 300, 20, 10, Red)
-      drawText(&"t: {globalt}", 300, 40, 10, Black)
-      drawFps(0, 0)
+      drawGui(mySynth)
       #discard guiCheckBox(Rectangle(x: 50, y: 40, width: 20, height: 20), "test", testCheck)
     drawing():
       shaderMode(postShader):

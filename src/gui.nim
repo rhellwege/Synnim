@@ -1,7 +1,7 @@
-import raylib, raymath, math, tables, locks, complex
+import raylib, raymath, math, tables, locks, complex, os, strformat
 import "synth.nim"
 import "signal.nim"
-import "extern/raygui"
+import "raygui.nim"
 
 # TODO: use raygui
 # TODO: allow user to control synth with midi
@@ -14,13 +14,26 @@ import "extern/raygui"
 #define RAYGUI_IMPLEMENTATION
 """.}
 
+# TODO: implement knob the way raygui does it with the context and the collisions and is dragged
+
 const
   maxFourierSamples: Natural = 2048
+  projectDir = currentSourcePath().parentDir().parentDir()
+  fontsDir = projectDir / "assets/fonts"
+  stylesDir = projectDir / "assets/styles"
+  guiStyle = stylesDir / "bluish.rgs"
 
 var
   activeComponentTable: Table[pointer, bool]
   samples: array[maxFourierSamples, float]
   frequencies: array[maxFourierSamples, Complex[float]]
+  guiFont: Font
+
+proc initGui*() =
+  #guiFont = loadFont(fontsDir / "Alegreya-Regular.ttf")
+  #setTextureFilter(guiFont.texture, Bilinear)
+  #guiSetFont(guiFont)
+  guiLoadStyle(guiStyle)
  
 proc getRenderRect*(): Rectangle {.inline.} = 
   result = Rectangle(x: 0, y: 0, width: getRenderWidth().toFloat(), height: getRenderHeight().toFloat())
@@ -82,7 +95,7 @@ proc drawFrequencies*(r: Rectangle, bands: Natural, showReflection: bool = false
       stretch * r.height * 
       (frequencies[i].abs() / totalBands.toFloat()), 
       0, r.height)
-    drawRectangle(Vector2(x: i.toFloat() * rw, y: r.height - freq), Vector2(x: rw, y: freq), Green)
+    drawRectangle(Vector2(x: i.toFloat() * rw, y: r.height - freq), Vector2(x: rw, y: freq), getColor(guiGetStyle(GuiControl.Default.int32, GuiControlProperty.BorderColorPressed.int32).uint32))
 
 proc drawEnvelope*(e: Envelope, r: Rectangle) =
   let totalTime = e.attackTime + e.decayTime + e.releaseTime
@@ -97,3 +110,17 @@ proc drawOscillator*(o: Oscillator, r: Rectangle) =
 
 proc drawSynth*(s: Synth, r: Rectangle) =
   discard
+
+proc drawGui*(s: ref Synth) = # TODO: instead of passing in s pass in the static audio context
+  #guiGetStyle()
+  #clearBackground(RayWhite)
+  discard guiPanel(getRenderRect(), "main")
+  drawWaves(getRenderRect(), 5)
+  drawFrequencies(getRenderRect(), 512, stretch = 3.0)
+  drawKnob(Vector2(x: 10, y: 20), 10.0, 0.0, 1.0, 0.01, s.patch.volume)
+  drawKnob(Vector2(x: 100, y: 100), 10.0, 0.0, 1.0, 0.01, s.patch.filters[0].alpha)
+  drawKnob(Vector2(x: 130, y: 100), 10.0, 0.0, 1.0, 0.01, s.patch.filters[1].alpha)
+  drawKnob(Vector2(x: 50, y: 50), 30.0, -12.0, 12.0, 0.01, s.patch.tonalOffset)
+  discard guiLabel(Rectangle(x: 300, y: 20, width: 50, height: 10), cstring &"Active notes: {s.activeNotes.len}")
+  discard guiLabel(Rectangle(x: 300, y: 30, width: 50, height: 10), cstring &"t: {globalt}")
+  drawFps(0, 0)
