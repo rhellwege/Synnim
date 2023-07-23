@@ -1,7 +1,7 @@
 import raylib, raymath, math, tables, locks, complex
 import "synth.nim"
 import "signal.nim"
-import raygui
+import "extern/raygui"
 
 # TODO: use raygui
 # TODO: allow user to control synth with midi
@@ -84,10 +84,10 @@ proc drawFrequencies*(r: Rectangle, bands: Natural, showReflection: bool = false
       0, r.height)
     drawRectangle(Vector2(x: i.toFloat() * rw, y: r.height - freq), Vector2(x: rw, y: freq), Green)
 
-proc drawEnvelope*(e: EnvelopeADSR, r: Rectangle) =
+proc drawEnvelope*(e: Envelope, r: Rectangle) =
   let totalTime = e.attackTime + e.decayTime + e.releaseTime
   # attack line
-  let attackPixels = Vector2(x: (e.attackTime/totalTime)*r.width, y: (r.y + r.height) - (e.attackVolume * r.height))
+  let attackPixels = Vector2(x: (e.attackTime/totalTime)*r.width, y: (r.y + r.height) - (e.attackValue * r.height))
   drawLine(Vector2(x: r.x, y: r.y + r.height), attackPixels, Red)
   drawRectangleLines(r, 2.0, Red)
   discard
