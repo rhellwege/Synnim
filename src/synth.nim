@@ -19,10 +19,14 @@ when defined(windows): # do not include windows functions that collide with the 
 # TODO: get good patches that sound like real instruments
 # TODO: improve fft visualizer
 # TODO: add glide, and max number of notes pressed at once (sends off event to each note before it in a quieue)
+# TODO: add custom parsing for enveloelope target, example: synth.tonalOffset, oscillators[0].envelope.release
 #       note envelopes operate on the note level (volume or tonalOffset of specific note)
+# TODO: fft visualization: take many samples, and iterate through exponentially (with semitones) to get the frequencies
 #  Note :program mutes audio when release time is 0
 #       global envelopes are triggered when ANY key is pressed and only trigger off when ALL keys are released
 # private constants
+
+
 type
   Hz* = float
   Semitone* = float
@@ -38,7 +42,7 @@ const
   stopRecordingKey: KeyBoardKey = Two
   noteDeactivateThresh: float = 0.001
   maxSampleHeight = 32_000
-  patchDir = currentSourcePath().parentDir().parentDir() / "assets/patches"
+  patchDir = currentSourcePath().parentDir().parentDir() / "resources/patches"
   recordingsDir = currentSourcePath().parentDir().parentDir() / "recordings"
 
 type
@@ -128,6 +132,10 @@ var
   prevFilteredSample: float = 0.0
   firstSample: bool = true
   highPassAlpha*: float = 0.1
+  #inbuffer: array[float, ]
+
+when defined(emscripten):
+  proc cpuTime*(): float = return globalt
 
 converter toFreq*(s: Semitone): Hz =
   return Hz baseFreq * pow(tonalroot2, s)

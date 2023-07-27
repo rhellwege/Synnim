@@ -1,6 +1,5 @@
---mm:arc
---threads:on
 when defined(emscripten):
+  echo "compiling with emscripten...\nWILL NOT WORK BECAUSE CODE DEPENDS ON CPUTIME FOR TIMING"
   --define:GraphicsApiOpenGlEs2
   --define:NaylibWebResources
   --os:linux
@@ -20,6 +19,7 @@ when defined(emscripten):
   --threads:off
   --panics:on
   --define:noSignalHandler
+  --passL:"-sALLOW_MEMORY_GROWTH"
   --passL:"-o public/index.html"
   # Use raylib/src/shell.html or raylib/src/minshell.html
-  # --passL:"--shell-file minshell.html"
+  --passL:"--shell-file minshell.html"

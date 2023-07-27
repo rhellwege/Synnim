@@ -1,7 +1,7 @@
 {
     "oscillators": [
       {
-        "sampler": "Triangle",
+        "sampler": "Square",
         "freqOffset": 0,
         "pitch": 0,
         "phase": 0,
@@ -9,8 +9,8 @@
         "envelope": {
           "initialValue": 0,
           "attackTime": 0.001,
-          "decayTime": 1,
-          "releaseTime": 0.001,
+          "decayTime": 0.1,
+          "releaseTime": 0.01,
           "sustainValue": 0,
           "attackValue": 1,
           "targetType": "Volume"
@@ -25,9 +25,9 @@
         "envelope": {
           "initialValue": 0,
           "attackTime": 0.001,
-          "decayTime": 0.3,
-          "releaseTime": 0.001,
-          "sustainValue": 0.9,
+          "decayTime": 0.1,
+          "releaseTime": 0.01,
+          "sustainValue": 0,
           "attackValue": 0.9,
           "targetType": "Volume"
         }
@@ -35,31 +35,15 @@
       {
         "sampler": "Sawtooth",
         "freqOffset": 0,
-        "pitch": 0,
+        "pitch": 12,
         "phase": 0,
         "volume": 0.5,
         "envelope": {
           "initialValue": 0,
-          "attackTime": 0.001,
-          "decayTime": 0,
-          "releaseTime": 0.001,
-          "sustainValue": 1,
-          "attackValue": 1,
-          "targetType": "Volume"
-        }
-      },
-      {
-        "sampler": "Noise",
-        "freqOffset": 0,
-        "pitch": 0,
-        "phase": 0,
-        "volume": 0.5,
-        "envelope": {
-          "initialValue": 0,
-          "attackTime": 0.001,
-          "decayTime": 0,
-          "releaseTime": 0.001,
-          "sustainValue": 1,
+          "attackTime": 0.01,
+          "decayTime": 0.1,
+          "releaseTime": 0.01,
+          "sustainValue": 0,
           "attackValue": 1,
           "targetType": "Volume"
         }

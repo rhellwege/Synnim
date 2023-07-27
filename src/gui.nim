@@ -19,9 +19,9 @@ import "raygui.nim"
 const
   maxFourierSamples: Natural = 2048
   projectDir = currentSourcePath().parentDir().parentDir()
-  fontsDir = projectDir / "assets/fonts"
-  stylesDir = projectDir / "assets/styles"
-  guiStyle = stylesDir / "bluish.rgs"
+  fontsDir = projectDir / "resources/fonts"
+  stylesDir = projectDir / "resources/styles"
+  guiStyle = stylesDir / "cherry.rgs"
 
 var
   activeComponentTable: Table[pointer, bool]
@@ -36,7 +36,7 @@ proc initGui*() =
   guiLoadStyle(guiStyle)
  
 proc getRenderRect*(): Rectangle {.inline.} = 
-  result = Rectangle(x: 0, y: 0, width: getRenderWidth().toFloat(), height: getRenderHeight().toFloat())
+  result = Rectangle(x: 0, y: 0, width: getScreenWidth().toFloat(), height: getScreenHeight().toFloat())
 
 proc drawKnob*(center: Vector2, radius: float, `low`: float, `high`: float, increment: float, modifier: var float, thickness: float = 2.0) =
   if distance(getMousePosition(), center) <= radius:
@@ -67,7 +67,7 @@ proc drawWaves*(r: Rectangle, wavelengths: float) =
   proc drawSample(sample: float, frameIdx: float) =
     #echo sample
     let sampleY = remap(sample, -1.0, 1.0, r.height, r.y)
-    drawPixel(Vector2(x: r.x + frameIdx, y: sampleY), Red)
+    drawPixel(Vector2(x: r.x + frameIdx, y: sampleY), getColor(guiGetStyle(GuiControl.Default.int32, GuiControlProperty.BorderColorPressed.int32).uint32))
 
   runSampler(r.width.Natural, dt, drawSample)
 
@@ -95,7 +95,7 @@ proc drawFrequencies*(r: Rectangle, bands: Natural, showReflection: bool = false
       stretch * r.height * 
       (frequencies[i].abs() / totalBands.toFloat()), 
       0, r.height)
-    drawRectangle(Vector2(x: i.toFloat() * rw, y: r.height - freq), Vector2(x: rw, y: freq), getColor(guiGetStyle(GuiControl.Default.int32, GuiControlProperty.BorderColorPressed.int32).uint32))
+    drawRectangle(Vector2(x: i.toFloat() * rw, y: r.height - freq), Vector2(x: rw, y: freq), getColor(guiGetStyle(GuiControl.Default.int32, GuiControlProperty.BorderColorNormal.int32).uint32))
 
 proc drawEnvelope*(e: Envelope, r: Rectangle) =
   let totalTime = e.attackTime + e.decayTime + e.releaseTime
