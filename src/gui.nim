@@ -1,30 +1,20 @@
-import raylib, raymath, math, tables, locks, complex, os, strformat
+import raylib, raymath, math, tables, complex, os, strformat
 import "synth.nim"
 import "signal.nim"
 import "raygui.nim"
-
-# type
-#   Widget = object
-#     id: Natural
-#     parent: Natural = 0
-#     children: seq[Natural] = @[]
-#     bounds: Rectangle
-#     shown: bool
-
-# # Global variables:
-# var
-#   widgets: seq[Widget] = @[]
-
-
-# TODO: use raygui
-# TODO: allow user to control synth with midi
-# TODO: allow user to play a midi recording
 
 # may need to #define RAYGUI_IMPLEMENTATION
 
 {.emit: """/*INCLUDESECTION*/
 #define RAYGUI_IMPLEMENTATION
 """.}
+
+when not defined(emscripten):
+  {.passC: "-DRAYGUI_WINDOWBOX_STATUSBAR_HEIGHT=24".}
+  var windowDragged = false
+  const rayguiWindowBoxStatusBarHeight = 24
+  proc getWindowBoxStatusBarRect(): Rectangle {.inline.} =
+    return Rectangle(x: 0, y: 0, width: getScreenWidth().toFloat(), height: rayguiWindowBoxStatusBarHeight)
 
 # TODO: implement knob the way raygui does it with the context and the collisions and is dragged
 
@@ -33,12 +23,13 @@ const
   projectDir = currentSourcePath().parentDir().parentDir()
   fontsDir = projectDir / "resources/fonts"
   stylesDir = projectDir / "resources/styles"
-  guiStyle = stylesDir / "cherry.rgs"
+  guiStyle = stylesDir / "bluish.rgs"
   postShaderStr = staticRead("../resources/shaders/post.fs")
   waveShaderStr = staticRead("../resources/shaders/wave_visualizer.fs")
   numSamples: int = 512
 
 var
+  fileState = initGuiWindowFileDialog("") # for the file dialog
   exitWindow: bool = false
   windowTitle: string
   waveSamples: array[numSamples, float32] # hack the precision
@@ -50,7 +41,6 @@ var
   # Textures / Shaders:
   backframe: RenderTexture
   postShader: Shader
-  #mySynth: ref Synth
   waveTexture: RenderTexture
   samplesTexture: RenderTexture2D # 512 x 2 texture. first row is raw sample data, second row is fft frequencies
   maxFreqAmplitude: float = 0.0
@@ -61,9 +51,31 @@ var
   wavePrimaryColorLoc: ShaderLocation
   waveSecondaryColorLoc: ShaderLocation
 
-proc initGui*(screenWidth: Natural, screenHeight: Natural, title: string) =
-  setConfigFlags(flags(Msaa4xHint, WindowResizable, WindowUndecorated)) # window config flags
-  initWindow(screenWidth.int32, screenHeight.int32, title)
+proc pos(r: Rectangle): Vector2 {.inline.} =
+  result = Vector2(x: r.x, y: r.y)
+
+proc size(r: Rectangle): Vector2 {.inline.} =
+  result = Vector2(x: r.width, y: r.height)
+
+proc Rectangle(pos: Vector2; size: Vector2): Rectangle =
+  result = Rectangle(x: pos.x, y: pos.y, width: size.x, height: size.y)
+
+## adds the position of b to position of a, size of a is disregarded 
+proc `+`(a: Rectangle; b: Rectangle): Rectangle {.inline.} =
+  result = Rectangle(pos = a.pos() + b.pos(), size = b.size())
+
+proc getScreenRect*(): Rectangle {.inline.} = 
+  result = Rectangle(x: 0, y: 0, width: getScreenWidth().toFloat(), height: getScreenHeight().toFloat())
+
+proc getWindowBodyRect*(): Rectangle {.inline.} =
+  result = Rectangle(x: 0, y: rayguiWindowBoxStatusBarHeight, width: getScreenWidth().toFloat(), height: getScreenHeight().toFloat() - rayguiWindowBoxStatusBarHeight)
+
+proc initGui*(screenWidth: int32; screenHeight: int32; title: string) =
+  let 
+    primaryColor = getColor(guiGetStyle(Default, BorderColorPressed).uint32)
+    secondaryColor = getColor(guiGetStyle(Default, BaseColorNormal).uint32)
+  setConfigFlags(flags(Msaa4xHint, WindowUndecorated)) # window config flags
+  initWindow(screenWidth, screenHeight, title)
   windowTitle = title
   guiLoadStyle(guiStyle)
   backframe  = loadRenderTexture(getScreenWidth(), getScreenHeight())
@@ -74,42 +86,41 @@ proc initGui*(screenWidth: Natural, screenHeight: Natural, title: string) =
   waveSamplesLoc        = getShaderLocation(waveShader, "samples")
   wavePrimaryColorLoc   = getShaderLocation(waveShader, "primaryColor")
   waveSecondaryColorLoc = getShaderLocation(waveShader, "secondaryColor")
-  let primaryColor = getColor(guiGetStyle(GuiControl.Default.int32, GuiControlProperty.BorderColorPressed.int32).uint32)
-  let secondaryColor = getColor(guiGetStyle(GuiControl.Default.int32, GuiControlProperty.BaseColorNormal.int32).uint32)
   setShaderValue(waveShader, wavePrimaryColorLoc, Vector4(x: primaryColor.r.float / 255.0, y: primaryColor.g.float / 255.0, z: primaryColor.b.float / 255.0, w: primaryColor.a.float / 255.0))
   setShaderValue(waveShader, waveSecondaryColorLoc, Vector4(x: secondaryColor.r.float / 255.0, y: secondaryColor.g.float / 255.0, z: secondaryColor.b.float / 255.0, w: secondaryColor.a.float / 255.0))
   setTextureFilter(backframe.texture, TextureFilter.Bilinear)
 
-proc getScreenRect*(): Rectangle {.inline.} = 
-  result = Rectangle(x: 0, y: 0, width: getScreenWidth().toFloat(), height: getScreenHeight().toFloat())
+proc drawKnob*(center: Vector2; radius: float; `low`: float; `high`: float; increment: float; modifier: var float) =
+  var strokeColor = getColor(guiGetStyle(Default, BorderColorNormal).uint32)
+  let 
+    thickness = guiGetStyle(Default, BorderWidth).float
+    lineColor = getColor(guiGetStyle(Default, BorderColorFocused).uint32)
+    fillColor = getColor(guiGetStyle(Button, BaseColorNormal).uint32)
 
-proc drawKnob*(center: Vector2, radius: float, `low`: float, `high`: float, increment: float, modifier: var float, thickness: float = 2.0) =
-  if distance(getMousePosition(), center) <= radius:
-    if isMouseButtonDown(Left):
-      activeComponentTable[addr modifier] = true
+  if not guiIsLocked() and guiGetState() != StateDisabled:
+    if checkCollisionPointCircle(getMousePosition(), center, radius):
+      if isMouseButtonDown(Left):
+        activeComponentTable[addr modifier] = true
       
-  if isMouseButtonReleased(Left):
-    activeComponentTable[addr modifier] = false
-  var strokeColor = Black
-
-  if activeComponentTable.contains(addr modifier) and activeComponentTable[addr modifier]:
-    modifier += -getMouseDelta().y * increment
-    modifier = clamp(modifier, `low`, `high`)
-    setMouseCursor(MouseCursor.ResizeNs)
-    strokeColor = SkyBlue
-
+    if isMouseButtonReleased(Left):
+      activeComponentTable[addr modifier] = false
+  
+    if activeComponentTable.contains(addr modifier) and activeComponentTable[addr modifier]:
+      modifier += -getMouseDelta().y * increment
+      modifier = clamp(modifier, `low`, `high`)
+      setMouseCursor(MouseCursor.ResizeNs)
+      strokeColor = getColor(guiGetStyle(Default, BorderColorPressed).uint32)
   drawRing(center, radius, radius + thickness, 0, 360, 120, strokeColor)
-    #drawCircleLines(center.x.int32, center.y.int32, radius + 2, SkyBlue)
 
-  drawCircle(center, radius, DarkGray)
+  drawCircle(center, radius, fillColor)
   let angle = remap(modifier, `low`, `high`, PI/6, (2*PI)-(PI/6)) + (PI / 2)
-  drawLine(center, center + Vector2(x: radius*cos(angle), y: radius*sin(angle)), White)
+  drawLine(center, center + Vector2(x: radius*cos(angle), y: radius*sin(angle)), lineColor)
 
-proc updateSamples(n: Natural, wavelengths: float) =
+proc updateSamples(n: Natural; wavelengths: float) =
   let dt = wavelengths/(numSamples.toFloat()*baseFreq)
   var maxAmp = 0.0
   
-  proc collectWaveSample(sample: float, frameIdx: float) =
+  proc collectWaveSample(sample: float; frameIdx: float) =
     samples[frameIdx.toInt()] = sample
     let s = remap(sample, -1.0, 1.0, 0.0, 255.0)
     
@@ -125,17 +136,17 @@ proc updateSamples(n: Natural, wavelengths: float) =
     freqSamples[i] = s
 
 
-proc drawWaves*(r: Rectangle, wavelengths: float) =
+proc drawWaves*(bounds: Rectangle; wavelengths: float) =
   # updateSamplesTexture should've been called before this
   if not waveTexture.isRenderTextureReady():
-    waveTexture = loadRenderTexture(r.width.int32, r.height.int32)
+    waveTexture = loadRenderTexture(bounds.size())
   setShaderValueV(waveShader, waveSamplesLoc, waveSamples)
-  setShaderValue(waveShader, waveResolutionLoc, Vector2(x: r.width, y: r.height))
+  setShaderValue(waveShader, waveResolutionLoc, bounds.size())
 
   shaderMode(waveShader):
-    drawTexture(waveTexture.texture, Vector2(x: r.x, y: r.y), White)
+    drawTexture(waveTexture.texture, bounds.pos(), White)
 
-proc drawFrequencies*(r: Rectangle, bands: Natural, showReflection: bool = false, stretch: float = 1.0) =
+proc drawFrequencies*(bounds: Rectangle; bands: Natural; showReflection: bool = false; stretch: float = 1.0) =
   var totalBands = 0
   if showReflection:
     assert(bands < maxFourierSamples) # must be a power of 2
@@ -143,63 +154,76 @@ proc drawFrequencies*(r: Rectangle, bands: Natural, showReflection: bool = false
   else:
     assert(bands * 2 < maxFourierSamples) # must be a power of 2
     totalBands = bands * 2
-  let dt = 1/(bands)
 
-  proc collectSamples(sample: float, frameIdx: float) =
-    samples[frameIdx.Natural] = sample
-
-  runSampler(totalBands, dt, collectSamples)
-
-  fft(samples, frequencies, totalBands)
-
-  let rw: float = r.width / bands.toFloat()
+  let rw: float = bounds.width / bands.toFloat()
 
   for i in 0..<bands:
     let freq = clamp(
-      stretch * r.height * 
-      (frequencies[i].abs() / totalBands.toFloat()), 
-      0, r.height)
-    drawRectangle(Vector2(x: i.toFloat() * rw, y: r.height - freq), Vector2(x: rw, y: freq), getColor(guiGetStyle(GuiControl.Default.int32, GuiControlProperty.BorderColorNormal.int32).uint32))
+      stretch * bounds.height * 
+      (freqSamples[i] / totalBands.toFloat()), 
+      0, bounds.height)
+    drawRectangle(Vector2(x: bounds.x + i.toFloat() * rw, y: bounds.y + bounds.height - freq),
+                  Vector2(x: rw, y: freq),
+                  getColor(guiGetStyle(Default, BorderColorNormal).uint32))
 
-proc drawEnvelope*(e: Envelope, r: Rectangle) =
+proc drawEnvelope*(bounds: Rectangle; e: Envelope) =
   let totalTime = e.attackTime + e.decayTime + e.releaseTime
   # attack line
-  let attackPixels = Vector2(x: (e.attackTime/totalTime)*r.width, y: (r.y + r.height) - (e.attackValue * r.height))
-  drawLine(Vector2(x: r.x, y: r.y + r.height), attackPixels, Red)
-  drawRectangleLines(r, 2.0, Red)
+  let attackPixels = Vector2(x: (e.attackTime/totalTime)*bounds.width, y: (bounds.y + bounds.height) - (e.attackValue * bounds.height))
+  drawLine(Vector2(x: bounds.x, y: bounds.y + bounds.height), attackPixels, Red)
+  drawRectangleLines(bounds, 2.0, Red)
   discard
 
-proc drawOscillator*(o: Oscillator, r: Rectangle) =
+proc drawOscillator*(bounds: Rectangle;o: Oscillator) =
   discard
 
-proc drawSynth*(s: Synth, r: Rectangle) =
+proc drawSynth*(bounds: Rectangle; s: Synth) =
   discard
 
-proc drawGui*(s: ref Synth) = # TODO: instead of passing in s pass in the static audio context
+proc drawGui*(bounds: Rectangle; s: ref Synth) = # TODO: instead of passing in s pass in the static audio context
+  setMouseCursor(MouseCursor.Default)
   s.handleInput()
-  #updateSamples(512, 5.0)
+  updateSamples(512, 5.0)
   drawing():
     textureMode(backframe): # should this go in gui.nim?
       clearBackground(White)
       when not defined(emscripten):
-        exitWindow = guiWindowBox(getScreenRect(), windowTitle).bool
-      drawFrequencies(getScreenRect(), 512, stretch = 3.0)
-      drawKnob(Vector2(x: 10, y: 20), 10.0, 0.0, 1.0, 0.01, s.patch.volume)
-      drawKnob(Vector2(x: 100, y: 100), 10.0, 0.0, 1.0, 0.01, s.patch.filters[0].alpha)
-      drawKnob(Vector2(x: 130, y: 100), 10.0, 0.0, 1.0, 0.01, s.patch.filters[1].alpha)
-      drawKnob(Vector2(x: 50, y: 50), 30.0, -12.0, 12.0, 0.01, s.patch.tonalOffset)
-      discard guiLabel(Rectangle(x: 300, y: 20, width: 50, height: 10), cstring &"Active notes: {s.activeNotes.len}")
-      discard guiLabel(Rectangle(x: 300, y: 30, width: 50, height: 10), cstring &"t: {globalt}")
+        exitWindow = guiWindowBox(getScreenRect(), windowTitle.cstring).bool
+      drawFrequencies(bounds, 512, stretch = 3.0)
+      # drawWaves(bounds, 5)
+      drawKnob(bounds.pos() + Vector2(x: 10, y: 20), 10.0, 0.0, 1.0, 0.01, s.patch.volume)
+      drawKnob(bounds.pos() + Vector2(x: 100, y: 100), 10.0, 0.0, 1.0, 0.01, s.patch.filters[0].alpha)
+      drawKnob(bounds.pos() + Vector2(x: 130, y: 100), 10.0, 0.0, 1.0, 0.01, s.patch.filters[1].alpha)
+      drawKnob(bounds.pos() + Vector2(x: 50, y: 50), 30.0, -12.0, 12.0, 0.01, s.patch.tonalOffset)
+      discard guiLabel(bounds + Rectangle(x: 300, y: 20, width: 100, height: 10), cstring &"Active notes: {s.activeNotes.len}")
+      discard guiLabel(bounds + Rectangle(x: 300, y: 30, width: 100, height: 10), cstring &"t: {globalt}")
+      discard guiLabel(bounds + Rectangle(x: 300, y: 40, width: 200, height: 10), cstring &"mpos: {getMousePosition().repr}")
+      discard guiLabel(bounds + Rectangle(x: 300, y: 50, width: 200, height: 10), cstring &"mdelta: {getMouseDelta().repr}")
+      discard guiLabel(bounds + Rectangle(x: 300, y: 60, width: 200, height: 10), cstring &"wpos: {getWindowPosition().repr}")
+
+      if guiButton(bounds + Rectangle(x: 500, y: 20, width: 100, height: 30), "Open Patch"):
+        fileState.windowActive = true
+
+      fileState.guiWindowFileDialog()
+        
     shaderMode(postShader):
       drawTexture(backframe.texture, Vector2(x: 0.0, y: 0.0), White)
-    drawFps(0, 0)
+    drawFps(bounds.pos().x.int32, bounds.pos().y.int32)
 
 proc runGui*(s: ref Synth) =
   when defined(emscripten):
     proc updateDrawFrame() =
-      drawGui(s)
+      drawGui(getScreenRect(), s)
     emscriptenSetMainLoop(updateDrawFrame, 0, 1)
   else:
     while not exitWindow and not windowShouldClose(): # Detect window close button or ESC key
-      drawGui(s)
+      if not windowDragged and checkCollisionPointRec(getMousePosition(), getWindowBoxStatusBarRect()) and isMouseButtonPressed(Left):
+        windowDragged = true
+      if windowDragged:
+        if getMouseDelta().length() > 0.01:
+          let newPos = getWindowPosition() + getMouseDelta()
+          setWindowPosition(newPos)
+        if isMouseButtonReleased(Left):
+          windowDragged = false
+      drawGui(getWindowBodyRect(), s)
     closeWindow()

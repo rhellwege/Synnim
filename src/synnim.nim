@@ -1,4 +1,3 @@
-import raylib, std/[math, strformat, times]
 import "synth.nim"
 import "gui.nim"
 
