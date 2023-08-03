@@ -1,22 +1,6 @@
 {
     "oscillators": [
       {
-        "sampler": "Square",
-        "freqOffset": 0,
-        "pitch": 0,
-        "phase": 0,
-        "volume": 1,
-        "envelope": {
-          "initialValue": 0,
-          "attackTime": 0.001,
-          "decayTime": 0.1,
-          "releaseTime": 0.01,
-          "sustainValue": 0,
-          "attackValue": 1,
-          "targetType": "Volume"
-        }
-      },
-      {
         "sampler": "Sine",
         "freqOffset": 0,
         "pitch": 0,
@@ -24,26 +8,10 @@
         "volume": 1,
         "envelope": {
           "initialValue": 0,
-          "attackTime": 0.001,
-          "decayTime": 0.1,
-          "releaseTime": 0.01,
-          "sustainValue": 0,
-          "attackValue": 0.9,
-          "targetType": "Volume"
-        }
-      },
-      {
-        "sampler": "Sawtooth",
-        "freqOffset": 0,
-        "pitch": 12,
-        "phase": 0,
-        "volume": 0.5,
-        "envelope": {
-          "initialValue": 0,
-          "attackTime": 0.01,
-          "decayTime": 0.1,
-          "releaseTime": 0.01,
-          "sustainValue": 0,
+          "attackTime": 0.2,
+          "decayTime": 0.2,
+          "releaseTime": 0.2,
+          "sustainValue": 0.8,
           "attackValue": 1,
           "targetType": "Volume"
         }

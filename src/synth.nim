@@ -1,4 +1,4 @@
-import std/[math, strformat, times, random, locks]
+import std/[math, strformat, random, locks, times]
 import os
 import raylib, raymath, jsony
 
@@ -25,6 +25,7 @@ when defined(windows): # do not include windows functions that collide with the 
 #  Note :program mutes audio when release time is 0
 #       global envelopes are triggered when ANY key is pressed and only trigger off when ALL keys are released
 # private constants
+# TODO: hot reloading from dll
 
 
 type
@@ -119,7 +120,7 @@ type
     activeKeyIds: array[keyMapping.len, tuple[ids: tuple[startId: int, endId: int], held: bool]]
     
 # static variables
-var
+var # put all of this into a context struct
   masterVolume* = 0.5
   globalt*: float = 0
   stream: AudioStream
@@ -134,8 +135,7 @@ var
   highPassAlpha*: float = 0.1
   #inbuffer: array[float, ]
 
-when defined(emscripten):
-  proc cpuTime*(): float = return globalt
+#when defined(emscripten):
 
 converter toFreq*(s: Semitone): Hz =
   return Hz baseFreq * pow(tonalroot2, s)
@@ -147,7 +147,7 @@ func int16ToSample*(bits: int16): float =
   return bits.toFloat()/maxSampleHeight.toFloat()
 
 proc applyEnvelope(n: var Note, e: Envelope) = # we need access to the filters
-  let curTime = cpuTime()
+  let curTime = globalt
   let sinceOn = curTime - n.onTime
   if n.onTime > n.offTime: # the user is holding the note
     if sinceOn <= e.attackTime:
@@ -167,23 +167,23 @@ proc applyEnvelope(n: var Note, e: Envelope) = # we need access to the filters
       n.active = false
       n.volume = 0.0
 
-proc oscSine(t: float, f: Hz): float {.inline.} =
+proc oscSine(t: float; f: Hz): float {.inline.} =
   result = sin(2*PI*f*t)
 
-proc oscTriangle(t: float, f: Hz): float {.inline.} =
+proc oscTriangle(t: float; f: Hz): float {.inline.} =
   result = arcsin(sin(2*PI*f*t))
 
-proc oscSquare(t: float, f: Hz): float {.inline.} =
+proc oscSquare(t: float; f: Hz): float {.inline.} =
   result = sin(2*PI*f*t)
   result = if result < 0.0: -1.0 else: 1.0
 
-proc oscSawtooth(t: float, f: Hz): float {.inline.} =
+proc oscSawtooth(t: float; f: Hz): float {.inline.} =
   result = (2*t*f mod 2.0) - 1.0
 
-proc oscNoise(t: float, f: Hz): float {.inline.} =
+proc oscNoise(t: float; f: Hz): float {.inline.} =
   result = rand(2.0) - 1.0
 
-proc evalSampler(kind: Sampler, t: float, f: float): float {.inline.} =
+proc evalSampler(kind: Sampler; t: float; f: float): float {.inline.} =
   case kind:
   of Sine:
     return oscSine(t, f)
@@ -198,7 +198,7 @@ proc evalSampler(kind: Sampler, t: float, f: float): float {.inline.} =
   else:
     raise newException(OSError, "Sampler not supported.")
 
-proc filterHighPass(a: var AudioFilter, sample: float): float {.inline.} =
+proc filterHighPass(a: var AudioFilter; sample: float): float {.inline.} =
   if a.firstSample: ## filtering
     a.prevSample = sample
     a.prevFilteredSample = sample
@@ -210,7 +210,7 @@ proc filterHighPass(a: var AudioFilter, sample: float): float {.inline.} =
     a.prevFilteredSample = result
     a.prevSample = temp
     
-proc filterLowPass(a: var AudioFilter, sample: float): float {.inline.} =
+proc filterLowPass(a: var AudioFilter; sample: float): float {.inline.} =
   if a.firstSample: ## filtering
     a.prevSample = sample
     a.prevFilteredSample = sample
@@ -229,7 +229,7 @@ proc evalFilter(a: var AudioFilter; sample: float): float {.inline.} =
   of HighPass:
     return filterHighPass(a, sample)
 
-proc applyLfo*(syn: ref Synth; l: var Lfo; t: float) {.inline.} = # ensure that modifier is valid memory
+proc applyLfo*(syn: ref Synth; l: var Lfo; t: float) {.inline.} =
   let sample = l.sampler.evalSampler(l.freq, t)
   let nextValue = l.offset + remap(sample, -1.0, 1.0, l.`low`, l.`high`)
   case l.target:
@@ -249,14 +249,12 @@ proc finalSample(t: float): float =
         let finalFrequency = (note.tone + syn.patch.oscillators[oscIndex].tonalOffset + syn.patch.tonalOffset).toFreq() + syn.patch.oscillators[oscIndex].freqOffset + syn.patch.freqOffset
         result += note.volume * syn.patch.oscillators[oscIndex].sampler.evalSampler(t, finalFrequency)
     result *= syn.patch.volume # apply synth volume
-    # apply filtering on the result, rendering loop may mess with the filtering, which will introduce artifacts
     for filter in syn.patch.filters.mitems():
       result = filter.evalFilter(result)
   result *= masterVolume # apply master volume
 
+## Saves the state of the filters, then collects samples and calls the callback proc each sample.
 proc runSampler*(frames: Natural, dt: float, callback: proc (sample: float, sampleIdx: float)) =
-  # t is implied to be 0
-  # save the state of all synths so what we do doesnt affect anything
   withLock(audioMutex):
     var savedFilters: seq[AudioFilter] = @[]
     for synth in synths:
@@ -272,7 +270,6 @@ proc runSampler*(frames: Natural, dt: float, callback: proc (sample: float, samp
         filter = savedFilters[index]
         inc index
 
-# where the magic happens: entry point to all mixing starts here.
 proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
   const dt = 1/sampleRate.float
   let arr = cast[ptr UncheckedArray[int16]](buffer)
@@ -291,7 +288,6 @@ proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
       if recording:
         recordBuffer.add(sampleToInt16(curSample))
       globalt += dt
-    #lowPass(buffer, frames, 0.01)
 
 proc savePatch*(p: Patch, name: string) =
   writeFile(patchDir / name & ".json", p.toJson())
@@ -344,7 +340,7 @@ proc stopRecording*() =
 
 proc noteOn(s: ref Synth; tone: Semitone; velocity: float = 1.0): tuple[startId: int, endId: int] = 
   withLock(audioMutex):
-    let curTime = cpuTime()
+    let curTime = globalt
     let startId = s.activeNotes.len
     result = (startId: startId, endId: s.activeNotes.len + s.patch.oscillators.len - 1)
     for i, osc in s.patch.oscillators.pairs():
@@ -353,7 +349,7 @@ proc noteOn(s: ref Synth; tone: Semitone; velocity: float = 1.0): tuple[startId:
 proc noteOff(s: ref Synth, ids: tuple[startId: int, endId: int]) =
   withLock(audioMutex):
     for i in countup(ids.startId, ids.endId):
-      s.activeNotes[i].note.offTime = cpuTime()
+      s.activeNotes[i].note.offTime = globalt
 
 proc handleInput*(s: ref Synth) =
   for i, key in keyMapping.pairs():
