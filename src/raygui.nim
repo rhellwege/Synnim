@@ -88,8 +88,8 @@ type
 
     fileNameEditMode*: bool 
     fileNameText*: array[1024, char] 
-    selectFilePressed*: bool  
-    cancelFilePressed*: bool 
+    SelectFilePressed*: bool  
+    CancelFilePressed*: bool 
     fileTypeActive*: int32
     itemFocused*: int32
 

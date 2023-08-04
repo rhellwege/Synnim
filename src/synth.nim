@@ -43,7 +43,7 @@ const
   stopRecordingKey: KeyBoardKey = Two
   noteDeactivateThresh: float = 0.001
   maxSampleHeight = 32_000
-  patchDir = currentSourcePath().parentDir().parentDir() / "resources/patches"
+  patchesDir = currentSourcePath().parentDir().parentDir() / "resources/patches"
   recordingsDir = currentSourcePath().parentDir().parentDir() / "recordings"
 
 type
@@ -290,18 +290,21 @@ proc audioInputCallback(buffer: pointer; frames: uint32) {.cdecl.} =
       globalt += dt
 
 proc savePatch*(p: Patch, name: string) =
-  writeFile(patchDir / name & ".json", p.toJson())
+  writeFile(patchesDir / name, p.toJson())
 
 proc loadPatch*(name: string): Patch =
-  let contents = readFile(patchDir / name & ".json")
+  let contents = readFile(name)
   return contents.fromJson(Patch)
+
+proc setPatch*(s: ref Synth; path: string) =
+  s.patch = loadPatch(path)
 
 # public interface
 proc init*(s: ref Synth) =
   if not isAudioDeviceReady():
     initAudioDevice()
     setAudioStreamBufferSizeDefault(maxSamplesPerUpdate)
-  s.patch = loadPatch("basic-synth")
+  s.patch = loadPatch(patchesDir / "basic-synth.json")
   # s.patch.oscillators.add(Oscillator(sampler: Triangle, envelope: Envelope(attackTime: 0.2, attackValue: 1.0, decayTime: 01.0, sustainValue: 0.0, releaseTime: 0.1)))
   # s.patch.oscillators.add(Oscillator(sampler: Sine, tonalOffset: 0, envelope: Envelope(attackTime: 0.3, attackValue: 0.9, decayTime: 0.3, sustainValue: 0.9, releaseTime: 0.2)))
   # s.patch.oscillators.add(Oscillator(volume: 0.5, sampler: Sawtooth, tonalOffset: 0.0, envelope: Envelope(attackTime: 0.2, attackValue: 1.0, decayTime: 0.0, sustainValue: 1.0, releaseTime: 0.1)))

@@ -15,6 +15,8 @@ when not defined(emscripten):
   const rayguiWindowBoxStatusBarHeight = 24
   proc getWindowBoxStatusBarRect(): Rectangle {.inline.} =
     return Rectangle(x: 0, y: 0, width: getScreenWidth().toFloat(), height: rayguiWindowBoxStatusBarHeight)
+  proc getWindowBodyRect*(): Rectangle {.inline.} =
+    result = Rectangle(x: 0, y: rayguiWindowBoxStatusBarHeight, width: getScreenWidth().toFloat(), height: getScreenHeight().toFloat() - rayguiWindowBoxStatusBarHeight)
 
 # TODO: implement knob the way raygui does it with the context and the collisions and is dragged
 
@@ -23,13 +25,14 @@ const
   projectDir = currentSourcePath().parentDir().parentDir()
   fontsDir = projectDir / "resources/fonts"
   stylesDir = projectDir / "resources/styles"
+  patchesDir = projectDir / "resources/patches"
   guiStyle = stylesDir / "bluish.rgs"
   postShaderStr = staticRead("../resources/shaders/post.fs")
   waveShaderStr = staticRead("../resources/shaders/wave_visualizer.fs")
   numSamples: int = 512
 
 var
-  fileState = initGuiWindowFileDialog("") # for the file dialog
+  patchesFileState: GuiWindowFileDialogState # for the file dialog
   exitWindow: bool = false
   windowTitle: string
   waveSamples: array[numSamples, float32] # hack the precision
@@ -61,14 +64,15 @@ proc Rectangle(pos: Vector2; size: Vector2): Rectangle =
   result = Rectangle(x: pos.x, y: pos.y, width: size.x, height: size.y)
 
 ## adds the position of b to position of a, size of a is disregarded 
-proc `+`(a: Rectangle; b: Rectangle): Rectangle {.inline.} =
-  result = Rectangle(pos = a.pos() + b.pos(), size = b.size())
+proc `+`(a: Rectangle; b: Vector2): Rectangle {.inline.} =
+  result = Rectangle(pos = a.pos() + b, size = a.size())
+
+proc `+`(a: Vector2; b: Rectangle): Rectangle {.inline.} =
+  result = Rectangle(pos = b.pos() + a, size = b.size())
 
 proc getScreenRect*(): Rectangle {.inline.} = 
   result = Rectangle(x: 0, y: 0, width: getScreenWidth().toFloat(), height: getScreenHeight().toFloat())
 
-proc getWindowBodyRect*(): Rectangle {.inline.} =
-  result = Rectangle(x: 0, y: rayguiWindowBoxStatusBarHeight, width: getScreenWidth().toFloat(), height: getScreenHeight().toFloat() - rayguiWindowBoxStatusBarHeight)
 
 proc initGui*(screenWidth: int32; screenHeight: int32; title: string) =
   let 
@@ -76,6 +80,8 @@ proc initGui*(screenWidth: int32; screenHeight: int32; title: string) =
     secondaryColor = getColor(guiGetStyle(Default, BaseColorNormal).uint32)
   setConfigFlags(flags(Msaa4xHint, WindowUndecorated)) # window config flags
   initWindow(screenWidth, screenHeight, title)
+  patchesFileState = initGuiWindowFileDialog(patchesDir)
+  # patchesFileState.filterExt = "json"
   windowTitle = title
   guiLoadStyle(guiStyle)
   backframe  = loadRenderTexture(getScreenWidth(), getScreenHeight())
@@ -174,7 +180,7 @@ proc drawEnvelope*(bounds: Rectangle; e: Envelope) =
   drawRectangleLines(bounds, 2.0, Red)
   discard
 
-proc drawOscillator*(bounds: Rectangle;o: Oscillator) =
+proc drawOscillator*(bounds: Rectangle; o: Oscillator) =
   discard
 
 proc drawSynth*(bounds: Rectangle; s: Synth) =
@@ -195,25 +201,43 @@ proc drawGui*(bounds: Rectangle; s: ref Synth) = # TODO: instead of passing in s
       drawKnob(bounds.pos() + Vector2(x: 100, y: 100), 10.0, 0.0, 1.0, 0.01, s.patch.filters[0].alpha)
       drawKnob(bounds.pos() + Vector2(x: 130, y: 100), 10.0, 0.0, 1.0, 0.01, s.patch.filters[1].alpha)
       drawKnob(bounds.pos() + Vector2(x: 50, y: 50), 30.0, -12.0, 12.0, 0.01, s.patch.tonalOffset)
-      discard guiLabel(bounds + Rectangle(x: 300, y: 20, width: 100, height: 10), cstring &"Active notes: {s.activeNotes.len}")
-      discard guiLabel(bounds + Rectangle(x: 300, y: 30, width: 100, height: 10), cstring &"t: {globalt}")
-      discard guiLabel(bounds + Rectangle(x: 300, y: 40, width: 200, height: 10), cstring &"mpos: {getMousePosition().repr}")
-      discard guiLabel(bounds + Rectangle(x: 300, y: 50, width: 200, height: 10), cstring &"mdelta: {getMouseDelta().repr}")
-      discard guiLabel(bounds + Rectangle(x: 300, y: 60, width: 200, height: 10), cstring &"wpos: {getWindowPosition().repr}")
+      discard guiLabel(bounds.pos() + Rectangle(x: 300, y: 20, width: 100, height: 10), cstring &"Active notes: {s.activeNotes.len}")
+      discard guiLabel(bounds.pos() + Rectangle(x: 300, y: 30, width: 100, height: 10), cstring &"t: {globalt}")
+      discard guiLabel(bounds.pos() + Rectangle(x: 300, y: 40, width: 200, height: 10), cstring &"mpos: {getMousePosition().repr}")
+      discard guiLabel(bounds.pos() + Rectangle(x: 300, y: 50, width: 200, height: 10), cstring &"mdelta: {getMouseDelta().repr}")
+      discard guiLabel(bounds.pos() + Rectangle(x: 300, y: 60, width: 200, height: 10), cstring &"wpos: {getWindowPosition().repr}")
 
-      if guiButton(bounds + Rectangle(x: 500, y: 20, width: 100, height: 30), "Open Patch"):
-        fileState.windowActive = true
+      guiSetTooltip("select a patch to change instrument settings.")
+      if checkCollisionPointRec(getMousePosition(), bounds.pos() + Rectangle(x: 500, y: 20, width: 100, height: 30)):
+        guiEnableTooltip()
+      else:
+        guiDisableToolTip()
 
-      fileState.guiWindowFileDialog()
-        
+      if guiButton(bounds.pos() + Rectangle(x: 500, y: 20, width: 100, height: 30), "Open Patch"):
+        patchesFileState.windowActive = true
+
+      patchesFileState.guiWindowFileDialog() # draw file dialog
+      if patchesFileState.CancelFilePressed:
+        echo "CANCEL"
+        copyMem(patchesFileState.dirPathText[0].addr.pointer, patchesDir.cstring, patchesDir.len())
+        patchesFileState.CancelFilePressed = false
+      if patchesFileState.SelectFilePressed:
+        s.setPatch(patchesDir / $cast[cstring](addr patchesFileState.fileNameText[0]))
+        copyMem(patchesFileState.dirPathText[0].addr.pointer, patchesDir.cstring, patchesDir.len())
+        patchesFileState.SelectFilePressed = false
+          
     shaderMode(postShader):
       drawTexture(backframe.texture, Vector2(x: 0.0, y: 0.0), White)
     drawFps(bounds.pos().x.int32, bounds.pos().y.int32)
 
+when defined(emscripten):
+  var globalSynth: ref Synth
+  proc updateDrawFrame() {.cdecl.} =
+    drawGui(getScreenRect(), globalSynth)
+  
 proc runGui*(s: ref Synth) =
   when defined(emscripten):
-    proc updateDrawFrame() =
-      drawGui(getScreenRect(), s)
+    globalSynth = s
     emscriptenSetMainLoop(updateDrawFrame, 0, 1)
   else:
     while not exitWindow and not windowShouldClose(): # Detect window close button or ESC key
