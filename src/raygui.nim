@@ -259,6 +259,24 @@ proc initWindow*(pos: Vector2; title: string) =
 proc loadRenderTexture*(size: Vector2): RenderTexture =
   return loadRenderTexture(size.x.int32, size.y.int32)
 
+proc guiComboBoxEnum*[T: enum](bounds: Rectangle, active: var T): T =
+  var i = active.int32
+  var formatStr = ""
+  for x in T.items():
+    formatStr.add(x.repr)
+    formatStr.add(';')
+  result = guiComboBox(bounds, formatStr.cstring, i).T
+  active = result
+
+# proc guiDropDownBoxEnum[T: enum](bounds: Rectangle, active: var T): T =
+#   var i = active.int32
+#   var formatStr = ""
+#   for x in T.items():
+#     formatStr.add(x.repr)
+#     formatStr.add(';')
+#   result = guiDropDownBox(bounds, formatStr.cstring, i).T
+#   active = result
+
 template tooltip*(bounds: Rectangle; text: string; body: untyped) =
   guiSetTooltip(text.cstring)
   try:

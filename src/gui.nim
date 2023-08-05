@@ -55,42 +55,112 @@ var
   wavePrimaryColorLoc: ShaderLocation
   waveSecondaryColorLoc: ShaderLocation
 
-proc pos(r: Rectangle): Vector2 {.inline.} =
+## returns a vector of rectangle's x and y
+func pos(r: Rectangle): Vector2 {.inline.} =
   result = Vector2(x: r.x, y: r.y)
 
-proc size(r: Rectangle): Vector2 {.inline.} =
+## returns a vector of rectangle's width and height
+func size(r: Rectangle): Vector2 {.inline.} =
   result = Vector2(x: r.width, y: r.height)
 
-proc Rectangle(pos: Vector2; size: Vector2): Rectangle =
+## center coordinate
+func center(r: Rectangle): Vector2 =
+  result = Vector2(x: r.x + r.width / 2.0, y: r.y + r.height / 2.0)
+
+## bottom right coordinate
+func br(r: Rectangle): Vector2 =
+  result = r.pos() + r.size()
+
+## rectangle constructor using two vectors
+func Rectangle(pos: Vector2; size: Vector2): Rectangle =
   result = Rectangle(x: pos.x, y: pos.y, width: size.x, height: size.y)
 
+## returns a rectangle with r's position, and everything else 0'd
+func ipos(r: Rectangle): Rectangle {.inline.} =
+  result = Rectangle(x: r.x, y: r.y, width: 0, height: 0)
+
+## returns a rectangle with r's size, and everything else 0'd
+func isize(r: Rectangle): Rectangle {.inline.} =
+  result = Rectangle(x: 0, y: 0, width: r.width, height: r.height)
+
+## returns a vector with v's x, and everything else 0'd
+func ix(v: Vector2): Vector2 = 
+  result = Vector2(y: 0, x: v.x)
+
+## returns a vector with v's y, and everything else 0'd
+func iy(v: Vector2): Vector2 = 
+  result = Vector2(x: 0, y: v.y)
+
+## returns a rectangle with r's x, and everything else 0'd
+func ix(r: Rectangle): Rectangle =
+  result = Rectangle(x: r.x, y: 0, width: 0, height: 0)
+
+## returns a rectangle with r's y, and everything else 0'd
+func iy(r: Rectangle): Rectangle =
+  result = Rectangle(x: 0, y: r.y, width: 0, height: 0)
+
+## returns a rectangle with r's width, and everything else 0'd
+func iwidth(r: Rectangle): Rectangle =
+  result = Rectangle(x: 0, y: 0, width: r.width, height: 0)
+
+## returns a rectangle with r's height, and everything else 0'd
+func iheight(r: Rectangle): Rectangle =
+  result = Rectangle(x: 0, y: 0, width: 0, height: r.height)
+
+## returns a new rectangle with specified x and everything else 0'd
+func rx(x: float): Rectangle =
+  result = Rectangle(x: x, y: 0, width: 0, height: 0)
+
+## returns a new rectangle with specified y and everything else 0'd
+func ry(y: float): Rectangle =
+  result = Rectangle(y: y, x: 0, width: 0, height: 0)
+
+## returns a new rectangle with specified width and everything else 0'd
+func rwidth(width: float): Rectangle =
+  result = Rectangle(width: width, x: 0, y: 0, height: 0)
+
+## returns a new rectangle with specified height and everything else 0'd
+func rheight(height: float): Rectangle =
+  result = Rectangle(height: height, x: 0, y: 0, width: 0)
+
+## returns a resized rectangle with padding removed
+func padding(r: Rectangle, p: float): Rectangle = 
+  result = Rectangle(x: r.x + p, y: r.y + p, width: r.width - p * 2.0, height: r.height - p * 2.0)
+
+func `/`[T: SomeNumber](r: Rectangle, d: T): Rectangle =
+  result = Rectangle(x: r.x / d, y: r.y / d, width: r.width / d, height: r.height / d)
+
+func `*`[T: SomeNumber](r: Rectangle, d: T): Rectangle =
+  result = Rectangle(x: r.x * d, y: r.y * d, width: r.width * d, height: r.height * d)
+
+func `+`[T: SomeNumber](r: Rectangle, d: T): Rectangle =
+  result = Rectangle(x: r.x + d, y: r.y + d, width: r.width + d, height: r.height + d)
+
+func `-`[T: SomeNumber](r: Rectangle, d: T): Rectangle =
+  result = Rectangle(x: r.x - d, y: r.y - d, width: r.width - d, height: r.height - d)
+
+func splitWidth(r: Rectangle): Rectangle = 
+  return Rectangle(x: r.x, y: r.y, width: r.width / 2, height: r.height)
+
+func splitHeight(r: Rectangle): Rectangle = 
+  return Rectangle(x: r.x, y: r.y, width: r.width, height: r.height / 2)
+
 ## adds the position of b to position of a, size of a is disregarded 
-proc `+`(a: Rectangle; b: Vector2): Rectangle {.inline.} =
+func `+`(a: Rectangle; b: Vector2): Rectangle {.inline.} =
   result = Rectangle(pos = a.pos() + b, size = a.size())
 
-proc `+`(a: Vector2; b: Rectangle): Rectangle {.inline.} =
+func `+`(a: Vector2; b: Rectangle): Rectangle {.inline.} =
   result = Rectangle(pos = b.pos() + a, size = b.size())
+
+func `-`(a: Rectangle; b: Vector2): Rectangle {.inline.} =
+  result = Rectangle(pos = a.pos() - b, size = a.size())
+
+func `-`(a: Vector2; b: Rectangle): Rectangle {.inline.} =
+  result = Rectangle(pos = b.pos() - a, size = b.size())
 
 proc getScreenRect*(): Rectangle {.inline.} = 
   result = Rectangle(x: 0, y: 0, width: getScreenWidth().toFloat(), height: getScreenHeight().toFloat())
 
-proc guiComboBoxEnum[T: enum](bounds: Rectangle, active: var T): T =
-  var i = active.int32
-  var formatStr = ""
-  for x in T.items():
-    formatStr.add(x.repr)
-    formatStr.add(';')
-  result = guiComboBox(bounds, formatStr.cstring, i).T
-  active = result
-
-# proc guiDropDownBoxEnum[T: enum](bounds: Rectangle, active: var T): T =
-#   var i = active.int32
-#   var formatStr = ""
-#   for x in T.items():
-#     formatStr.add(x.repr)
-#     formatStr.add(';')
-#   result = guiDropDownBox(bounds, formatStr.cstring, i).T
-#   active = result
 
 proc initGui*(screenWidth: int32; screenHeight: int32; title: string) =
   let 
@@ -201,8 +271,8 @@ proc drawEnvelope*(bounds: Rectangle; e: Envelope) =
 proc drawOscillator*(bounds: Rectangle; o: Oscillator) =
   discard
 
-proc drawSynth*(bounds: Rectangle; s: Synth) =
-  discard
+proc drawSynth*(bounds: Rectangle; s: ref Synth) =
+  discard guiGroupBox(bounds, "Synth")
 
 proc drawGui*(bounds: Rectangle; s: ref Synth) = # TODO: instead of passing in s pass in the static audio context
   setMouseCursor(MouseCursor.Default)
@@ -213,7 +283,7 @@ proc drawGui*(bounds: Rectangle; s: ref Synth) = # TODO: instead of passing in s
       clearBackground(White)
       when not defined(emscripten):
         exitWindow = guiWindowBox(getScreenRect(), windowTitle.cstring).bool
-      drawFrequencies(bounds, 512, stretch = 3.0)
+      drawFrequencies(bounds.pos() + bounds.splitHeight().isize(), 512, stretch = 3.0)
       # drawWaves(bounds, 5)
       drawKnob(bounds.pos() + Vector2(x: 10, y: 20), 10.0, 0.0, 1.0, 0.01, s.patch.volume)
       drawKnob(bounds.pos() + Vector2(x: 100, y: 100), 10.0, 0.0, 1.0, 0.01, s.patch.filters[0].alpha)
@@ -237,6 +307,7 @@ proc drawGui*(bounds: Rectangle; s: ref Synth) = # TODO: instead of passing in s
           s.setPatch(patchesFileState.getFullPath())
           patchesFileState.setDirPath(patchesDir)
           patchesFileState.SelectFilePressed = false
+      drawSynth((bounds.pos() + ry(bounds.height/2).pos() + bounds.splitHeight().isize()).padding(4.0), s)
     shaderMode(postShader):
       drawTexture(backframe.texture, Vector2(x: 0.0, y: 0.0), White)
     drawFps(bounds.pos().x.int32, bounds.pos().y.int32)
