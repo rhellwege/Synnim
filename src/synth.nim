@@ -70,7 +70,7 @@ type
     sustainValue*: float = 1
     attackValue*: float = 1
     targetType: EnvelopeTarget = Volume
-  Sampler* = enum
+  Sampler* {.size: sizeof(int32).} = enum 
     Sine
     Square
     Sawtooth
@@ -297,7 +297,12 @@ proc loadPatch*(name: string): Patch =
   return contents.fromJson(Patch)
 
 proc setPatch*(s: ref Synth; path: string) =
-  s.patch = loadPatch(path)
+  var p: Patch
+  try:
+    p = loadPatch(path)
+  except CatchableError:
+    return
+  s.patch = p
 
 # public interface
 proc init*(s: ref Synth) =
@@ -305,15 +310,6 @@ proc init*(s: ref Synth) =
     initAudioDevice()
     setAudioStreamBufferSizeDefault(maxSamplesPerUpdate)
   s.patch = loadPatch(patchesDir / "basic-synth.json")
-  # s.patch.oscillators.add(Oscillator(sampler: Triangle, envelope: Envelope(attackTime: 0.2, attackValue: 1.0, decayTime: 01.0, sustainValue: 0.0, releaseTime: 0.1)))
-  # s.patch.oscillators.add(Oscillator(sampler: Sine, tonalOffset: 0, envelope: Envelope(attackTime: 0.3, attackValue: 0.9, decayTime: 0.3, sustainValue: 0.9, releaseTime: 0.2)))
-  # s.patch.oscillators.add(Oscillator(volume: 0.5, sampler: Sawtooth, tonalOffset: 0.0, envelope: Envelope(attackTime: 0.2, attackValue: 1.0, decayTime: 0.0, sustainValue: 1.0, releaseTime: 0.1)))
-  # s.patch.filters.add(AudioFilter(kind: LowPass))
-  # s.patch.filters.add(AudioFilter(kind: HighPass))
-  # s.patch.volume = masterVolume
-  #s.patch.savePatch("basic-synth")
-  # s.patch.lfos.add(Lfo(sampler: Triangle, `low`: 0.0, `high`: 12.0, freq: 0.1, target: TonalOffset))
-  # s.patch.savePatch("basic-synth")
   initLock audioMutex
   # Init raw audio stream (sample rate: 44100, sample size: 16bit-short, channels: 1-mono)
   if not stream.isAudioStreamReady:

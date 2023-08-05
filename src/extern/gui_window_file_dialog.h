@@ -120,7 +120,6 @@ void GuiWindowFileDialog(GuiWindowFileDialogState *state);
 #if defined(GUI_WINDOW_FILE_DIALOG_IMPLEMENTATION)
 
 #include "raygui.h"
-#include "stdio.h"
 #include <string.h>     // Required for: strcpy()
 
 //----------------------------------------------------------------------------------
@@ -274,7 +273,11 @@ void GuiWindowFileDialog(GuiWindowFileDialogState *state)
 
         // Draw window and controls
         //----------------------------------------------------------------------------------------
-        state->windowActive = !GuiWindowBox(state->windowBounds, "#198# Select File Dialog");
+        bool windowOpen = GuiWindowBox(state->windowBounds, "#198# Select File Dialog");
+        state->windowActive = !windowOpen;
+        if (!windowOpen) {
+            state->CancelFilePressed;
+        }
 
         // Draw previous directory button + logic
         if (GuiButton((Rectangle){ state->windowBounds.x + state->windowBounds.width - 48, state->windowBounds.y + 24 + 12, 40, 24 }, "< .."))
@@ -384,7 +387,11 @@ void GuiWindowFileDialog(GuiWindowFileDialogState *state)
 
         state->SelectFilePressed = GuiButton((Rectangle){ state->windowBounds.x + state->windowBounds.width - 96 - 8, state->windowBounds.y + state->windowBounds.height - 68, 96, 24 }, "Select");
 
-        if (GuiButton((Rectangle){ state->windowBounds.x + state->windowBounds.width - 96 - 8, state->windowBounds.y + state->windowBounds.height - 24 - 12, 96, 24 }, "Cancel")) state->windowActive = false;
+        if (GuiButton((Rectangle){ state->windowBounds.x + state->windowBounds.width - 96 - 8, state->windowBounds.y + state->windowBounds.height - 24 - 12, 96, 24 }, "Cancel"))
+        {
+           state->windowActive = false; 
+            state->CancelFilePressed = true;
+        } 
         //--------------------------------------------------------------------------------------
 
         // Exit on file selected
@@ -393,6 +400,7 @@ void GuiWindowFileDialog(GuiWindowFileDialogState *state)
         // File dialog has been closed, free all memory before exit
         if (!state->windowActive)
         {
+            if (!state->SelectFilePressed) state->CancelFilePressed = true;
             // Free dirFilesIcon memory
             for (int i = 0; i < MAX_DIRECTORY_FILES; i++) RL_FREE(dirFilesIcon[i]);
 

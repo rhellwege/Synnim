@@ -32,6 +32,7 @@ const
   numSamples: int = 512
 
 var
+  activeSampler = Sampler.Sine
   patchesFileState: GuiWindowFileDialogState # for the file dialog
   exitWindow: bool = false
   windowTitle: string
@@ -73,6 +74,23 @@ proc `+`(a: Vector2; b: Rectangle): Rectangle {.inline.} =
 proc getScreenRect*(): Rectangle {.inline.} = 
   result = Rectangle(x: 0, y: 0, width: getScreenWidth().toFloat(), height: getScreenHeight().toFloat())
 
+proc guiComboBoxEnum[T: enum](bounds: Rectangle, active: var T): T =
+  var i = active.int32
+  var formatStr = ""
+  for x in T.items():
+    formatStr.add(x.repr)
+    formatStr.add(';')
+  result = guiComboBox(bounds, formatStr.cstring, i).T
+  active = result
+
+# proc guiDropDownBoxEnum[T: enum](bounds: Rectangle, active: var T): T =
+#   var i = active.int32
+#   var formatStr = ""
+#   for x in T.items():
+#     formatStr.add(x.repr)
+#     formatStr.add(';')
+#   result = guiDropDownBox(bounds, formatStr.cstring, i).T
+#   active = result
 
 proc initGui*(screenWidth: int32; screenHeight: int32; title: string) =
   let 
@@ -81,7 +99,8 @@ proc initGui*(screenWidth: int32; screenHeight: int32; title: string) =
   setConfigFlags(flags(Msaa4xHint, WindowUndecorated)) # window config flags
   initWindow(screenWidth, screenHeight, title)
   patchesFileState = initGuiWindowFileDialog(patchesDir)
-  # patchesFileState.filterExt = "json"
+  patchesFileState.setFilterExt(".json")
+  echo patchesFileState.repr
   windowTitle = title
   guiLoadStyle(guiStyle)
   backframe  = loadRenderTexture(getScreenWidth(), getScreenHeight())
@@ -206,26 +225,22 @@ proc drawGui*(bounds: Rectangle; s: ref Synth) = # TODO: instead of passing in s
       discard guiLabel(bounds.pos() + Rectangle(x: 300, y: 40, width: 200, height: 10), cstring &"mpos: {getMousePosition().repr}")
       discard guiLabel(bounds.pos() + Rectangle(x: 300, y: 50, width: 200, height: 10), cstring &"mdelta: {getMouseDelta().repr}")
       discard guiLabel(bounds.pos() + Rectangle(x: 300, y: 60, width: 200, height: 10), cstring &"wpos: {getWindowPosition().repr}")
-
       guiSetTooltip("select a patch to change instrument settings.")
       if checkCollisionPointRec(getMousePosition(), bounds.pos() + Rectangle(x: 500, y: 20, width: 100, height: 30)):
         guiEnableTooltip()
       else:
         guiDisableToolTip()
-
+      discard guiComboBoxEnum(bounds.pos() + Rectangle(x: 300, y: 200, width: 200, height: 150), activeSampler)
       if guiButton(bounds.pos() + Rectangle(x: 500, y: 20, width: 100, height: 30), "Open Patch"):
         patchesFileState.windowActive = true
-
       patchesFileState.guiWindowFileDialog() # draw file dialog
       if patchesFileState.CancelFilePressed:
-        echo "CANCEL"
-        copyMem(patchesFileState.dirPathText[0].addr.pointer, patchesDir.cstring, patchesDir.len())
+        patchesFileState.setDirPath(patchesDir)
         patchesFileState.CancelFilePressed = false
       if patchesFileState.SelectFilePressed:
-        s.setPatch(patchesDir / $cast[cstring](addr patchesFileState.fileNameText[0]))
-        copyMem(patchesFileState.dirPathText[0].addr.pointer, patchesDir.cstring, patchesDir.len())
+        s.setPatch(patchesFileState.getFullPath())
+        patchesFileState.setDirPath(patchesDir)
         patchesFileState.SelectFilePressed = false
-          
     shaderMode(postShader):
       drawTexture(backframe.texture, Vector2(x: 0.0, y: 0.0), White)
     drawFps(bounds.pos().x.int32, bounds.pos().y.int32)
