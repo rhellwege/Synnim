@@ -258,3 +258,20 @@ proc initWindow*(pos: Vector2; title: string) =
 
 proc loadRenderTexture*(size: Vector2): RenderTexture =
   return loadRenderTexture(size.x.int32, size.y.int32)
+
+template tooltip*(bounds: Rectangle; text: string; body: untyped) =
+  guiSetTooltip(text.cstring)
+  try:
+    if checkCollisionPointRec(getMousePosition(), bounds):
+      guiEnableTooltip()
+    body
+  finally:
+    guiDisableTooltip()
+
+template pushStyle*(control: GuiControl; property: GuiControlProperty; value: int32; body: untyped) =
+  let prevValue = guiGetStyle(control, property)
+  try:
+    guiSetStyle(control, property, value)
+    body
+  finally:
+    guiSetStyle(control, property, prevValue)
