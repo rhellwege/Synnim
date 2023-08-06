@@ -26,7 +26,7 @@ const
   fontsDir = projectDir / "resources/fonts"
   stylesDir = projectDir / "resources/styles"
   patchesDir = projectDir / "resources/patches"
-  guiStyle = stylesDir / "bluish.rgs"
+  guiStyle = stylesDir / "cherry.rgs"
   postShaderStr = staticRead("../resources/shaders/post.fs")
   waveShaderStr = staticRead("../resources/shaders/wave_visualizer.fs")
   numSamples: int = 512
@@ -165,6 +165,7 @@ proc drawEnvelope*(bounds: Rectangle; e: Envelope) =
   discard
 
 var editMode: bool = false
+# idea: lock gui if the mouse is outside the synth scroll list
 proc drawOscillator*(bounds: Rectangle; o: var Oscillator) =
   discard guiGroupBox(bounds, "oscillator")
   editMode = guiDropDownBoxEnum(bounds.ipos() + Rectangle(x: 10, y: 10, width: bounds.width - 20, height: 20), o.sampler, editMode)
@@ -178,8 +179,9 @@ proc drawSynth*(bounds: Rectangle; s: ref Synth) =
   let content = rwidth(w * nOsc.toFloat())
   discard guiScrollPanel(bounds, nil.cstring, content, scroll, panelView)
   scissorModeRect(bounds):
-    for i, osc in s.patch.oscillators.mpairs():
-      drawOscillator((scroll.rpos() + bounds.ipos() + rx(i.toFloat() * w) + rwidth(w) + rheight(bounds.height)).padding(widgetPadding), osc)
+    lockGuiIf(not checkCollisionPointRec(getMousePosition(), bounds)):
+      for i, osc in s.patch.oscillators.mpairs():
+        drawOscillator((scroll.rpos() + bounds.ipos() + rx(i.toFloat() * w) + rwidth(w) + rheight(bounds.height)).padding(widgetPadding), osc)
 
 proc drawGui*(bounds: Rectangle; s: ref Synth) = # TODO: instead of passing in s pass in the static audio context
   setMouseCursor(MouseCursor.Default)

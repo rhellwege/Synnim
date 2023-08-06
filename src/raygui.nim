@@ -408,6 +408,14 @@ template isolateGuiIf*(cond: bool, body: untyped) =
   if cond:
     guiDisable()
 
+template lockGuiIf*(cond: bool, body: untyped) =
+  if cond:
+    guiLock()
+  else:
+    guiUnlock()
+  body
+  guiUnlock()
+
 template scissorModeRect*(r: Rectangle, body: untyped) =
   beginScissorMode(r.x.int32, r.y.int32, r.width.int32, r.height.int32)
   body
