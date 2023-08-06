@@ -371,22 +371,21 @@ proc loadRenderTexture*(size: Vector2): RenderTexture =
   return loadRenderTexture(size.x.int32, size.y.int32)
 
 proc guiComboBoxEnum*[T: enum](bounds: Rectangle, active: var T): T =
-  var i = active.int32
   var formatStr = ""
   for x in T.items():
     formatStr.add(x.repr)
     formatStr.add(';')
-  result = guiComboBox(bounds, formatStr.cstring, i).T
-  active = result
+  formatStr = formatStr.substr(0, formatStr.len() - 2) # remove extra ;
+  result = guiComboBox(bounds, formatStr.cstring, cast[var int32](active.addr)).T
 
-# proc guiDropDownBoxEnum[T: enum](bounds: Rectangle, active: var T): T =
-#   var i = active.int32
-#   var formatStr = ""
-#   for x in T.items():
-#     formatStr.add(x.repr)
-#     formatStr.add(';')
-#   result = guiDropDownBox(bounds, formatStr.cstring, i).T
-#   active = result
+## returns true if mouse pressed.
+proc guiDropDownBoxEnum*[T: enum](bounds: Rectangle, active: var T, editMode: bool): bool =
+  var formatStr = ""
+  for x in T.items():
+    formatStr.add(x.repr)
+    formatStr.add(';')
+  formatStr = formatStr.substr(0, formatStr.len() - 2) # remove extra ;
+  result = guiDropDownBox(bounds, formatStr.cstring, cast[var int32](active.addr), editMode).bool
 
 template tooltip*(bounds: Rectangle; text: string; body: untyped) =
   guiSetTooltip(text.cstring)

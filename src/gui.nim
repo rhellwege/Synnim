@@ -36,6 +36,7 @@ var
   activeSampler = Sampler.Sine
   patchesFileState: GuiWindowFileDialogState # for the file dialog
   exitWindow: bool = false
+  dragWindowPanOffset: Vector2
   windowTitle: string
   waveSamples: array[numSamples, float32] # hack the precision
   freqSamples: array[numSamples, float]
@@ -163,8 +164,10 @@ proc drawEnvelope*(bounds: Rectangle; e: Envelope) =
   drawRectangleLines(bounds, 2.0, Red)
   discard
 
+var editMode: bool = false
 proc drawOscillator*(bounds: Rectangle; o: var Oscillator) =
   discard guiGroupBox(bounds, "oscillator")
+  editMode = guiDropDownBoxEnum(bounds.ipos() + Rectangle(x: 10, y: 10, width: bounds.width - 20, height: 20), o.sampler, editMode)
 
 var panelView: Rectangle
 var scroll: Vector2
@@ -174,7 +177,6 @@ proc drawSynth*(bounds: Rectangle; s: ref Synth) =
   let w = if nOsc < 2: bounds.width / nOsc.toFloat() else: bounds.width / 2 
   let content = rwidth(w * nOsc.toFloat())
   discard guiScrollPanel(bounds, nil.cstring, content, scroll, panelView)
-  discard guiLabel(bounds.center().rpos() + rsize(Vector2(x: 500, y: 30)), cstring &"{scroll.repr}\n{panelView.repr}")
   scissorModeRect(bounds):
     for i, osc in s.patch.oscillators.mpairs():
       drawOscillator((scroll.rpos() + bounds.ipos() + rx(i.toFloat() * w) + rwidth(w) + rheight(bounds.height)).padding(widgetPadding), osc)
@@ -231,10 +233,10 @@ proc runGui*(s: ref Synth) =
     while not exitWindow and not windowShouldClose(): # Detect window close button or ESC key
       if not windowDragged and checkCollisionPointRec(getMousePosition(), getWindowBoxStatusBarRect()) and isMouseButtonPressed(Left):
         windowDragged = true
+        dragWindowPanOffset = getMousePosition()
       if windowDragged:
-        if getMouseDelta().length() > 0.01:
-          let newPos = getWindowPosition() + getMouseDelta()
-          setWindowPosition(newPos)
+        let newPos = getWindowPosition() + (getMousePosition() - dragWindowPanOffset)
+        setWindowPosition(newPos)
         if isMouseButtonReleased(Left):
           windowDragged = false
       drawGui(getWindowBodyRect(), s)

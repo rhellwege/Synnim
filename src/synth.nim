@@ -76,7 +76,7 @@ type
     Sawtooth
     Triangle
     Noise
-    Wav # unsupported
+    # Wav # unsupported
   Oscillator* =  object
     sampler*: Sampler
     freqOffset*: Hz = 0.0
@@ -116,7 +116,7 @@ type
     volume*: float = 0
   Synth* = object # runtime information
     patch*: Patch
-    activeNotes*: seq[tuple[note: Note, oscillator: Natural]] = @[] # dont use pointer, use index
+    activeNotes*: seq[tuple[note: Note, oscillator: Natural]] = @[] # dont use pointercast[var int32] (active.addr))    
     activeKeyIds: array[keyMapping.len, tuple[ids: tuple[startId: int, endId: int], held: bool]]
     
 # static variables
